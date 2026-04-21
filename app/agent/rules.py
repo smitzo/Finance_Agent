@@ -224,18 +224,26 @@ def check_base_charge(bill: dict, rate_row: dict) -> Finding:
     )
 
 
-def check_weight_vs_bol(bill: dict, bols: list[dict], previously_billed_weight: float = 0) -> Finding:
+def check_weight_vs_bol(
+    bill: dict,
+    bols: list[dict],
+    prior_billed_weight: float = 0,
+    **kwargs,
+) -> Finding:
     """
     Check billed weight against BOL actual weight.
     For partial deliveries, accounts for weight already covered by prior bills.
     """
+    if "previously_billed_weight" in kwargs and not prior_billed_weight:
+        prior_billed_weight = kwargs["previously_billed_weight"]
+
     billed_weight = bill.get("billed_weight_kg", 0)
     bol_total = sum(b.get("actual_weight_kg", 0) for b in bols)
 
     if not bols:
         return Finding(code="NO_BOL", severity="warn", message="No BOL found to validate weight")
 
-    remaining = bol_total - previously_billed_weight
+    remaining = bol_total - prior_billed_weight
     if remaining < 0:
         remaining = 0
 
@@ -243,7 +251,7 @@ def check_weight_vs_bol(bill: dict, bols: list[dict], previously_billed_weight: 
         return Finding(
             code="WEIGHT_MATCH",
             severity="ok",
-            message=f"Billed {billed_weight}kg consistent with BOL {bol_total}kg (prior billed: {previously_billed_weight}kg)",
+            message=f"Billed {billed_weight}kg consistent with BOL {bol_total}kg (prior billed: {prior_billed_weight}kg)",
         )
 
     over = billed_weight - remaining
@@ -251,11 +259,11 @@ def check_weight_vs_bol(bill: dict, bols: list[dict], previously_billed_weight: 
     return Finding(
         code="WEIGHT_MISMATCH",
         severity=severity,
-        message=f"Billed {billed_weight}kg vs BOL remaining {remaining}kg (BOL total={bol_total}kg, prior billed={previously_billed_weight}kg)",
+        message=f"Billed {billed_weight}kg vs BOL remaining {remaining}kg (BOL total={bol_total}kg, prior billed={prior_billed_weight}kg)",
         detail={
             "billed_weight": billed_weight,
             "bol_total": bol_total,
-            "prior_billed": previously_billed_weight,
+            "prior_billed": prior_billed_weight,
             "remaining": remaining,
             "over_by": round(over, 2),
         },

@@ -155,10 +155,23 @@ async def load_context(state: AgentState) -> dict:
 
     # ── Duplicate check: same bill_number across all freight bills in graph ───
     bill_number = bill.get("bill_number", "")
+    incoming_carrier_id = carrier_id or bill.get("carrier_id")
+    incoming_carrier_name = (bill.get("carrier_name") or "").strip().lower()
     for nid, ndata in graph.G.nodes(data=True):
+        node_carrier_id = ndata.get("carrier_id")
+        node_carrier_name = (ndata.get("carrier_name") or "").strip().lower()
+        same_carrier = False
+        if incoming_carrier_id and node_carrier_id:
+            same_carrier = incoming_carrier_id == node_carrier_id
+        elif incoming_carrier_name and node_carrier_name:
+            same_carrier = incoming_carrier_name == node_carrier_name
+        else:
+            same_carrier = not incoming_carrier_id and not incoming_carrier_name
+
         if (
             ndata.get("type") == "freight_bill"
             and ndata.get("bill_number") == bill_number
+            and same_carrier
             and ndata.get("id") != bill_id
         ):
             dup_ids.append(ndata.get("id", nid))

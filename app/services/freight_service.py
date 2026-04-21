@@ -18,6 +18,17 @@ from app.models.db_models import FreightBill, FreightBillStatus, AuditLog
 logger = logging.getLogger(__name__)
 
 
+def _map_decision_to_status(decision: str | None) -> FreightBillStatus:
+    value = (decision or "").strip().lower()
+    if value in {"auto_approve", "approve", "approved"}:
+        return FreightBillStatus.approved
+    if value in {"dispute", "disputed"}:
+        return FreightBillStatus.disputed
+    if value in {"reject", "rejected"}:
+        return FreightBillStatus.rejected
+    return FreightBillStatus.awaiting_review
+
+
 async def get_bill(db: AsyncSession, bill_id: str) -> FreightBill | None:
     return await db.get(FreightBill, bill_id)
 
@@ -85,12 +96,8 @@ async def persist_result(
 
     if interrupted:
         fb.status = FreightBillStatus.awaiting_review
-    elif decision == "auto_approve":
-        fb.status = FreightBillStatus.approved
-    elif decision == "dispute":
-        fb.status = FreightBillStatus.disputed
     else:
-        fb.status = FreightBillStatus.awaiting_review
+        fb.status = _map_decision_to_status(decision)
 
     for ev in audit_events:
         db.add(AuditLog(

@@ -30,10 +30,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    volumes:
-      - ./seed_data.json:/app/seed_data.json:ro
     command: >
-      sh -c "alembic upgrade head && python -m scripts.seed && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+      sh -c "python scripts/seed_loader.py && uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
 volumes:
   postgres_data:

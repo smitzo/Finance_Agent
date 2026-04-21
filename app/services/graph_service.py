@@ -16,7 +16,7 @@ import networkx as nx
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.models.db_models import Carrier, CarrierContract, Shipment, BillOfLading
+from app.models.db_models import Carrier, CarrierContract, Shipment, BillOfLading, FreightBill
 
 
 class GraphService:
@@ -88,6 +88,23 @@ class GraphService:
                 "actual_weight_kg": b.actual_weight_kg,
             })
             G.add_edge(f"shipment:{b.shipment_id}", node_id, rel="has_bol")
+
+        # Freight bills (historical + already-processed)
+        freight_bills = (await db.execute(select(FreightBill))).scalars().all()
+        for fb in freight_bills:
+            node_id = f"fb:{fb.id}"
+            G.add_node(node_id, type="freight_bill", **{
+                "id": fb.id,
+                "carrier_id": fb.carrier_id,
+                "carrier_name": fb.carrier_name,
+                "bill_number": fb.bill_number,
+                "shipment_reference": fb.shipment_reference,
+                "billed_weight_kg": fb.billed_weight_kg,
+            })
+            if fb.shipment_reference:
+                shp_node = f"shipment:{fb.shipment_reference}"
+                if G.has_node(shp_node):
+                    G.add_edge(node_id, shp_node, rel="references")
 
         self.G = G
 
