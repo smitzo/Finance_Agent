@@ -44,7 +44,7 @@ uvicorn app.main:app --reload --port 8000
 ### Run Tests
 
 ```bash
-pytest tests/ -v
+pytest app/tests/ -v
 ```
 
 ---
