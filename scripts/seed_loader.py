@@ -18,10 +18,20 @@ from pathlib import Path
 # Make sure app is importable from project root
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import AsyncSessionLocal, engine
-from app.models.db_models import Base, Carrier, CarrierContract, Shipment, BillOfLading
+from app.models.db_models import (
+    AuditLog,
+    Base,
+    BillOfLading,
+    Carrier,
+    CarrierContract,
+    FreightBill,
+    FreightBillStatus,
+    Shipment,
+)
 
 PROJECT_ROOT = Path(__file__).parent.parent
 SEED_FILE_CANDIDATES = [
@@ -48,6 +58,35 @@ def resolve_seed_path(arg_path: str | None = None) -> Path:
 async def _exists(db: AsyncSession, model, pk: str) -> bool:
     result = await db.get(model, pk)
     return result is not None
+
+
+async def _find_existing_bill_by_business_key(
+    db: AsyncSession,
+    carrier_id: str | None,
+    carrier_name: str | None,
+    bill_number: str,
+) -> FreightBill | None:
+    if carrier_id:
+        result = await db.execute(
+            select(FreightBill).where(
+                FreightBill.carrier_id == carrier_id,
+                FreightBill.bill_number == bill_number,
+            )
+        )
+        existing = result.scalars().first()
+        if existing:
+            return existing
+
+    normalized_name = (carrier_name or "").strip().lower()
+    if normalized_name:
+        result = await db.execute(
+            select(FreightBill).where(FreightBill.bill_number == bill_number)
+        )
+        for row in result.scalars().all():
+            if (row.carrier_name or "").strip().lower() == normalized_name:
+                return row
+
+    return None
 
 
 async def load_seed(seed_path: Path | None = None) -> None:
@@ -130,6 +169,57 @@ async def load_seed(seed_path: Path | None = None) -> None:
                 print(f"  + BOL {b['id']}")
             else:
                 print(f"  ~ BOL {b['id']} already exists, skipping")
+
+        await db.flush()
+
+        # Freight Bills
+        for fb in data.get("freight_bills", []):
+            if await _exists(db, FreightBill, fb["id"]):
+                print(f"  ~ FreightBill {fb['id']} already exists, skipping")
+                continue
+
+            duplicate = await _find_existing_bill_by_business_key(
+                db,
+                carrier_id=fb.get("carrier_id"),
+                carrier_name=fb.get("carrier_name"),
+                bill_number=fb["bill_number"],
+            )
+            if duplicate:
+                print(
+                    "  ~ FreightBill "
+                    f"{fb['id']} skipped because bill_number '{fb['bill_number']}' "
+                    f"already exists for the same carrier (existing id={duplicate.id})"
+                )
+                continue
+
+            evidence = {}
+            if fb.get("_scenario"):
+                evidence["seed_scenario"] = fb["_scenario"]
+
+            db.add(FreightBill(
+                id=fb["id"],
+                carrier_id=fb.get("carrier_id"),
+                carrier_name=fb["carrier_name"],
+                bill_number=fb["bill_number"],
+                bill_date=fb.get("bill_date"),
+                shipment_reference=fb.get("shipment_reference"),
+                lane=fb.get("lane"),
+                billed_weight_kg=fb.get("billed_weight_kg"),
+                rate_per_kg=fb.get("rate_per_kg"),
+                billing_unit=fb.get("billing_unit", "kg"),
+                base_charge=fb.get("base_charge"),
+                fuel_surcharge=fb.get("fuel_surcharge"),
+                gst_amount=fb.get("gst_amount"),
+                total_amount=fb.get("total_amount"),
+                status=FreightBillStatus.pending,
+                evidence=evidence or None,
+            ))
+            db.add(AuditLog(
+                freight_bill_id=fb["id"],
+                event="seed_bill_loaded",
+                detail={"source": "seed_loader"},
+            ))
+            print(f"  + FreightBill {fb['id']}")
 
         await db.commit()
 

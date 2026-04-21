@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Freight Dashboard · Pending Review</title>
+    <link rel="stylesheet" href="/dashboard/static/dashboard.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <h1>Pending Review Queue</h1>
+          <p>Approve or dispute low-confidence freight bills and resume the agent.</p>
+        </div>
+        <nav class="nav" aria-label="Dashboard navigation">
+          <a href="/dashboard/metrics">Metrics</a>
+          <a class="active" href="/dashboard/reviews">Pending Review</a>
+        </nav>
+      </header>
+
+      <section class="hero">
+        <div class="hero-panel">
+          <h2>Reviewer Workbench</h2>
+          <p id="queue-status">Loading review queue...</p>
+          <div class="actions" style="margin-top: 14px;">
+            <button id="refresh-queue" class="primary">Refresh Queue</button>
+            <span class="badge warn"><span id="queue-count">--</span>&nbsp;waiting</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="review-queue" class="queue"></section>
+    </main>
+    <script src="/dashboard/static/reviews.js"></script>
+  </body>
+</html>

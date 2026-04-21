@@ -13,8 +13,10 @@ from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
+from app.api.dashboard_routes import router as dashboard_router
 from app.api.routes import router as api_router
 from app.config import get_settings
 from app.db.session import AsyncSessionLocal, database_url, engine
@@ -78,6 +80,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+dashboard_static_dir = Path(__file__).resolve().parent / "dashboard" / "static"
+app.mount("/dashboard/static", StaticFiles(directory=dashboard_static_dir), name="dashboard-static")
+
+app.include_router(dashboard_router)
 app.include_router(api_router)
 
 

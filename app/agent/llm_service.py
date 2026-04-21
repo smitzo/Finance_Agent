@@ -141,40 +141,41 @@ async def _call_llm(prompt: str, max_tokens: int = 500, operation: str = "generi
                 )
             return result
         else:  # anthropic
-            request_payload = {
-                "model": "claude-haiku-4-5-20251001",
-                "max_tokens": max_tokens,
-                "messages": [{"role": "user", "content": prompt}],
-            }
-            if settings.llm_debug_payloads:
-                logger.info(
-                    "LLM Anthropic request operation=%s payload=%s",
-                    operation,
-                    _truncate(json.dumps(request_payload, ensure_ascii=False)),
-                )
-            resp = await client.messages.create(
-                **request_payload,
-            )
-            result = resp.content[0].text.strip()
-            logger.info("LLM call success operation=%s provider=%s", operation, provider)
-            if settings.llm_debug_payloads:
-                usage_dump = None
-                try:
-                    usage_dump = resp.usage.model_dump() if resp.usage else None
-                except Exception:
-                    usage_dump = str(resp.usage)
-                response_payload = {
-                    "id": getattr(resp, "id", None),
-                    "model": getattr(resp, "model", None),
-                    "usage": usage_dump,
-                    "content": result,
-                }
-                logger.info(
-                    "LLM Anthropic response operation=%s payload=%s",
-                    operation,
-                    _truncate(json.dumps(response_payload, ensure_ascii=False)),
-                )
-            return result
+            pass
+            # request_payload = {
+            #     "model": "claude-haiku-4-5-20251001",
+            #     "max_tokens": max_tokens,
+            #     "messages": [{"role": "user", "content": prompt}],
+            # }
+            # if settings.llm_debug_payloads:
+            #     logger.info(
+            #         "LLM Anthropic request operation=%s payload=%s",
+            #         operation,
+            #         _truncate(json.dumps(request_payload, ensure_ascii=False)),
+            #     )
+            # resp = await client.messages.create(
+            #     **request_payload,
+            # )
+            # result = resp.content[0].text.strip()
+            # logger.info("LLM call success operation=%s provider=%s", operation, provider)
+            # if settings.llm_debug_payloads:
+            #     usage_dump = None
+            #     try:
+            #         usage_dump = resp.usage.model_dump() if resp.usage else None
+            #     except Exception:
+            #         usage_dump = str(resp.usage)
+            #     response_payload = {
+            #         "id": getattr(resp, "id", None),
+            #         "model": getattr(resp, "model", None),
+            #         "usage": usage_dump,
+            #         "content": result,
+            #     }
+            #     logger.info(
+            #         "LLM Anthropic response operation=%s payload=%s",
+            #         operation,
+            #         _truncate(json.dumps(response_payload, ensure_ascii=False)),
+            #     )
+            # return result
     except Exception as e:
         if _looks_like_quota_or_rate_limit_error(e):
             _open_llm_circuit(str(e))
@@ -193,8 +194,7 @@ async def normalize_carrier_name(incoming_name: str, known_carriers: list[dict])
     prompt = f"""
         You are matching a carrier name from a freight bill to a known carrier in our system.
         Incoming carrier name: "{incoming_name}"
-        Known carriers:
-        {carrier_list}
+        Known carriers: {carrier_list}
 
         If the incoming name clearly refers to one of the known carriers (allowing for abbreviations,
         alternate names, or minor variations), reply with ONLY the carrier id (e.g. "CAR001").
@@ -238,11 +238,9 @@ async def resolve_ambiguous_contract(
 
     prompt = f"""
         A freight bill has been submitted and multiple carrier contracts cover the same lane.
-        Freight bill details:
-        {bill_summary}
+        Freight bill details: {bill_summary}
 
-        Candidate contracts (all active on the bill date):
-        {candidates_json}
+        Candidate contracts (all active on the bill date): {candidates_json}
 
         Choose the SINGLE best matching contract based on:
         1. Which contract's rate_per_kg matches the billed rate most closely
