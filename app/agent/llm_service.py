@@ -68,22 +68,23 @@ async def _call_llm(prompt: str, max_tokens: int = 500) -> str:
 
 async def normalize_carrier_name(incoming_name: str, known_carriers: list[dict]) -> str | None:
     """
-    Fuzzy-match an incoming carrier name against known carriers.
-    Returns carrier_id if a confident match is found, else None.
+    Fuzzy-match an incoming carrier name against known carriers. Returns carrier_id if a confident match is found, else None.
     """
     if not known_carriers:
         return None
 
     carrier_list = "\n".join(f"- id={c['id']}, name={c['name']}" for c in known_carriers)
-    prompt = f"""You are matching a carrier name from a freight bill to a known carrier in our system.
-Incoming carrier name: "{incoming_name}"
-Known carriers:
-{carrier_list}
+    prompt = f"""
+        You are matching a carrier name from a freight bill to a known carrier in our system.
+        Incoming carrier name: "{incoming_name}"
+        Known carriers:
+        {carrier_list}
 
-If the incoming name clearly refers to one of the known carriers (allowing for abbreviations,
-alternate names, or minor variations), reply with ONLY the carrier id (e.g. "CAR001").
-If no match is confident, reply with "NO_MATCH".
-Reply with nothing else."""
+        If the incoming name clearly refers to one of the known carriers (allowing for abbreviations,
+        alternate names, or minor variations), reply with ONLY the carrier id (e.g. "CAR001").
+        If no match is confident, reply with "NO_MATCH".
+        Reply with nothing else.
+    """
 
     result = await _call_llm(prompt, max_tokens=20)
     result = result.strip().strip('"')
@@ -119,20 +120,22 @@ async def resolve_ambiguous_contract(
         "billed_weight_kg": bill.get("billed_weight_kg"),
     }, indent=2)
 
-    prompt = f"""A freight bill has been submitted and multiple carrier contracts cover the same lane.
-Freight bill details:
-{bill_summary}
+    prompt = f"""
+        A freight bill has been submitted and multiple carrier contracts cover the same lane.
+        Freight bill details:
+        {bill_summary}
 
-Candidate contracts (all active on the bill date):
-{candidates_json}
+        Candidate contracts (all active on the bill date):
+        {candidates_json}
 
-Choose the SINGLE best matching contract based on:
-1. Which contract's rate_per_kg matches the billed rate most closely
-2. Contract notes about SLA or shipment type
-3. Effective/expiry dates (prefer most recent if rates match)
+        Choose the SINGLE best matching contract based on:
+        1. Which contract's rate_per_kg matches the billed rate most closely
+        2. Contract notes about SLA or shipment type
+        3. Effective/expiry dates (prefer most recent if rates match)
 
-Reply with a JSON object ONLY (no markdown):
-{{"chosen_contract_id": "<id>", "reasoning": "<1-2 sentence explanation>"}}"""
+        Reply with a JSON object ONLY (no markdown):
+        {{"chosen_contract_id": "<id>", "reasoning": "<1-2 sentence explanation>"}}
+    """
 
     result = await _call_llm(prompt, max_tokens=200)
     try:
@@ -163,16 +166,14 @@ async def generate_explanation(
     findings_text = "\n".join(
         f"- [{f['severity'].upper()}] {f['message']}" for f in findings
     )
-    prompt = f"""You are summarizing the result of an automated freight bill audit for a logistics ops team.
-
-Freight bill: {bill_id}
-Decision: {decision}
-Confidence: {confidence:.0%}
-
-Validation findings:
-{findings_text}
-
-Write a clear 2-3 sentence explanation suitable for a human reviewer. Be specific about what was checked and what the key issue is (if any). Do not use bullet points."""
+    prompt = f"""
+        You are summarizing the result of an automated freight bill audit for a logistics ops team.
+            Freight bill: {bill_id}
+            Decision: {decision}
+            Confidence: {confidence:.0%}
+            Validation findings:{findings_text}
+        Write a clear 2-3 sentence explanation suitable for a human reviewer. Be specific about what was checked and what the key issue is (if any). Do not use bullet points.
+    """
 
     result = await _call_llm(prompt, max_tokens=200)
     if not result:

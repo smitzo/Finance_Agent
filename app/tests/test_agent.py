@@ -14,7 +14,7 @@ from app.agent.rules import (
 )
 
 
-# ── check_duplicate ───────────────────────────────────────────────────────────
+# check_duplicate 
 
 def test_no_duplicate():
     f = check_duplicate("SFX/2025/00234", "CAR001", [])
@@ -27,7 +27,7 @@ def test_duplicate_detected():
     assert f.code == "DUPLICATE_BILL"
 
 
-# ── check_carrier_known ───────────────────────────────────────────────────────
+# check_carrier_known 
 
 def test_carrier_known():
     f = check_carrier_known("CAR001", "Safexpress Logistics")
@@ -40,7 +40,7 @@ def test_carrier_unknown():
     assert f.code == "UNKNOWN_CARRIER"
 
 
-# ── check_contract_active ─────────────────────────────────────────────────────
+# check_contract_active 
 
 def test_contract_active():
     contract = {
@@ -83,7 +83,7 @@ def test_no_contract():
     assert f.code == "NO_CONTRACT"
 
 
-# ── check_rate ────────────────────────────────────────────────────────────────
+# check_rate 
 
 def test_rate_exact_match():
     bill = {"rate_per_kg": 15.00}
@@ -109,7 +109,7 @@ def test_rate_mismatch_error():
     assert f.detail["pct_diff"] == pytest.approx(8.75, rel=1e-2)
 
 
-# ── check_fuel_surcharge ──────────────────────────────────────────────────────
+# check_fuel_surcharge 
 
 def test_fuel_surcharge_original():
     bill = {"base_charge": 12750.00, "fuel_surcharge": 1020.00}
@@ -141,7 +141,7 @@ def test_fuel_surcharge_wrong_rate_used():
     assert f.severity == "error"
 
 
-# ── check_weight_vs_bol ───────────────────────────────────────────────────────
+# check_weight_vs_bol 
 
 def test_weight_clean_match():
     bill = {"billed_weight_kg": 850}
@@ -166,7 +166,7 @@ def test_weight_overbilling_detected():
     assert f.code == "WEIGHT_MISMATCH"
 
 
-# ── check_total_amount ────────────────────────────────────────────────────────
+# check_total_amount 
 
 def test_total_consistent():
     bill = {"base_charge": 12750.00, "fuel_surcharge": 1020.00, "gst_amount": 2479.00, "total_amount": 16249.00}
@@ -180,7 +180,7 @@ def test_total_inconsistent():
     assert f.severity == "error"
 
 
-# ── confidence scoring ────────────────────────────────────────────────────────
+# confidence scoring 
 
 def test_confidence_all_ok():
     vr = ValidationResult()
