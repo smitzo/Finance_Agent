@@ -19,13 +19,31 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
-from app.config import get_settings
 from app.db.session import AsyncSessionLocal, engine
 from app.models.db_models import Base, Carrier, CarrierContract, Shipment, BillOfLading
 
-SEED_FILE = Path(__file__).parent.parent / "seed_data_logistics.json"
+PROJECT_ROOT = Path(__file__).parent.parent
+SEED_FILE_CANDIDATES = [
+    PROJECT_ROOT / "seed_data_logistics.json",
+    PROJECT_ROOT / "seed data logistics.json",
+]
+
+
+def resolve_seed_path(arg_path: str | None = None) -> Path:
+    if arg_path:
+        candidate = Path(arg_path)
+        if not candidate.is_absolute():
+            candidate = PROJECT_ROOT / candidate
+        if candidate.exists():
+            return candidate
+
+    for candidate in SEED_FILE_CANDIDATES:
+        if candidate.exists():
+            return candidate
+
+    expected = ", ".join(str(p) for p in SEED_FILE_CANDIDATES)
+    raise FileNotFoundError(f"No seed file found. Expected one of: {expected}")
 
 
 async def _exists(db: AsyncSession, model, pk: str) -> bool:
@@ -33,7 +51,8 @@ async def _exists(db: AsyncSession, model, pk: str) -> bool:
     return result is not None
 
 
-async def load_seed(seed_path: Path = SEED_FILE) -> None:
+async def load_seed(seed_path: Path | None = None) -> None:
+    seed_path = seed_path or resolve_seed_path()
     print(f"Loading seed data from {seed_path} ...")
 
     with open(seed_path) as f:
@@ -119,4 +138,5 @@ async def load_seed(seed_path: Path = SEED_FILE) -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(load_seed())
+    cli_path = sys.argv[1] if len(sys.argv) > 1 else None
+    asyncio.run(load_seed(resolve_seed_path(cli_path)))

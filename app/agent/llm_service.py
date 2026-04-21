@@ -19,12 +19,23 @@ settings = get_settings()
 
 
 def _get_llm_client():
-    if settings.llm_provider == "openai" and settings.openai_api_key:
+    preferred = (settings.llm_provider or "").strip().lower()
+
+    if preferred == "openai" and settings.openai_api_key:
         from openai import AsyncOpenAI
         return ("openai", AsyncOpenAI(api_key=settings.openai_api_key))
-    elif settings.anthropic_api_key:
+    if preferred == "anthropic" and settings.anthropic_api_key:
         from anthropic import AsyncAnthropic
         return ("anthropic", AsyncAnthropic(api_key=settings.anthropic_api_key))
+
+    # Fallback: if preferred provider is not configured, use any available key.
+    if settings.openai_api_key:
+        from openai import AsyncOpenAI
+        return ("openai", AsyncOpenAI(api_key=settings.openai_api_key))
+    if settings.anthropic_api_key:
+        from anthropic import AsyncAnthropic
+        return ("anthropic", AsyncAnthropic(api_key=settings.anthropic_api_key))
+
     return (None, None)
 
 

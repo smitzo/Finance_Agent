@@ -25,13 +25,24 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.session import get_db, engine
+from app.db.session import get_db, engine
 from app.models.db_models import Base, FreightBill, FreightBillStatus, AuditLog, Carrier, CarrierContract, Shipment, BillOfLading
-from app.graph_service import get_graph_service
-from app.agent import get_agent
+from app.services.graph_service import get_graph_service
+from app.agent.agent import get_agent
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+
+def _map_decision_to_status(decision: str | None) -> FreightBillStatus:
+    value = (decision or "").strip().lower()
+    if value in {"auto_approve", "approve", "approved"}:
+        return FreightBillStatus.approved
+    if value in {"dispute", "disputed"}:
+        return FreightBillStatus.disputed
+    if value in {"reject", "rejected"}:
+        return FreightBillStatus.rejected
+    return FreightBillStatus.awaiting_review
 
 # ── App setup ─────────────────────────────────────────────────────────────────
 
@@ -58,7 +69,7 @@ async def startup():
         await conn.run_sync(Base.metadata.create_all)
 
     # Build in-memory graph from DB
-    from app.session import AsyncSessionLocal
+    from app.db.session import AsyncSessionLocal
     async with AsyncSessionLocal() as db:
         graph_service = get_graph_service()
         await graph_service.build(db)
@@ -117,7 +128,7 @@ async def run_agent_for_bill(bill_id: str, bill_dict: dict):
     Run the LangGraph agent asynchronously.
     Writes results back to Postgres when done (or on interrupt).
     """
-    from app.session import AsyncSessionLocal
+    from app.db.session import AsyncSessionLocal
 
     agent = get_agent()
     thread_id = f"thread-{bill_id}"
@@ -166,9 +177,11 @@ async def run_agent_for_bill(bill_id: str, bill_dict: dict):
                     continue
                 final_state = node_output
 
-        # If we reach here, the agent completed without interrupt
         state_snapshot = agent.get_state(config)
-        await _persist_agent_result(bill_id, state_snapshot.values, interrupted=False)
+        interrupted = bool(getattr(state_snapshot, "next", None))
+        if interrupted:
+            logger.info(f"[{bill_id}] Agent paused for human review")
+        await _persist_agent_result(bill_id, state_snapshot.values, interrupted=interrupted)
 
     except Exception as e:
         # LangGraph raises GraphInterrupt when interrupt() is called
@@ -188,7 +201,7 @@ async def run_agent_for_bill(bill_id: str, bill_dict: dict):
 
 async def _persist_agent_result(bill_id: str, state: dict, interrupted: bool):
     """Write agent findings, decision, and status back to Postgres."""
-    from app.session import AsyncSessionLocal
+    from app.db.session import AsyncSessionLocal
 
     async with AsyncSessionLocal() as db:
         fb = await db.get(FreightBill, bill_id)
@@ -215,12 +228,8 @@ async def _persist_agent_result(bill_id: str, state: dict, interrupted: bool):
 
         if interrupted:
             fb.status = FreightBillStatus.awaiting_review
-        elif decision == "auto_approve":
-            fb.status = FreightBillStatus.approved
-        elif decision == "dispute":
-            fb.status = FreightBillStatus.disputed
         else:
-            fb.status = FreightBillStatus.awaiting_review
+            fb.status = _map_decision_to_status(decision)
 
         # Write audit entries
         for ev in audit_events:
