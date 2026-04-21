@@ -13,3 +13,5 @@ venv/
 *.db
 alembic/versions/*.py
 !alembic/versions/.gitkeep
+logs/
+*.logs

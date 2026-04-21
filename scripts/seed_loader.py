@@ -26,8 +26,6 @@ from app.models.db_models import Base, Carrier, CarrierContract, Shipment, BillO
 PROJECT_ROOT = Path(__file__).parent.parent
 SEED_FILE_CANDIDATES = [
     PROJECT_ROOT / "seed_data.json",
-    PROJECT_ROOT / "seed_data_logistics.json",
-    PROJECT_ROOT / "seed data logistics.json",
 ]
 
 

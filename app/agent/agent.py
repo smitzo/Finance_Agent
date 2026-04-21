@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any, TypedDict, Annotated
+from typing import TypedDict, Annotated
 import operator
 
 from langgraph.graph import StateGraph, END
@@ -45,6 +45,8 @@ from app.agent import llm_service
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+HARD_STOP_CODES_FOR_LLM = {"DUPLICATE_BILL", "UNKNOWN_CARRIER", "WEIGHT_MISMATCH", "TOTAL_INCONSISTENT"}
 
 
 class AgentState(TypedDict):
@@ -87,6 +89,15 @@ def _now() -> str:
     return datetime.utcnow().isoformat()
 
 
+def _contract_is_active_for_bill(contract: dict, bill_date: str) -> bool:
+    return rules.check_contract_active(contract, bill_date).severity == "ok"
+
+
+def _contract_meets_min_weight(bill: dict, contract: dict) -> bool:
+    rate_row = contract.get("matched_rate_row") or {}
+    return rules.check_min_weight(bill, rate_row).severity != "error"
+
+
 
 async def load_context(state: AgentState) -> dict:
     """
@@ -96,6 +107,7 @@ async def load_context(state: AgentState) -> dict:
     graph = get_graph_service()
     bill = state["bill"]
     bill_id = state["bill_id"]
+    logger.info("[%s] Stage=load_context start", bill_id)
 
     audit = [{"event": "load_context_start", "bill_id": bill_id, "ts": _now()}]
 
@@ -105,8 +117,10 @@ async def load_context(state: AgentState) -> dict:
     if carrier_id:
         carrier = graph.get_carrier_node(carrier_id)
 
-    # If no carrier_id or not found, try fuzzy match via LLM
-    if not carrier and bill.get("carrier_name"):
+    # If carrier_id is present but unknown, do not call LLM:
+    # this is a deterministic unknown-carrier case.
+    # Only fuzzy match when carrier_id is absent.
+    if not carrier and not carrier_id and bill.get("carrier_name"):
         all_carriers_proper = []
         for nid, ndata in graph.G.nodes(data=True):
             if ndata.get("type") == "carrier":
@@ -181,6 +195,14 @@ async def load_context(state: AgentState) -> dict:
         "duplicates_found": dup_ids,
         "ts": _now(),
     })
+    logger.info(
+        "[%s] Stage=load_context done carrier_id=%s contracts=%d shipment=%s duplicates=%d",
+        bill_id,
+        carrier_id,
+        len(candidate_contracts),
+        shipment.get("id") if shipment else None,
+        len(dup_ids),
+    )
 
     return {
         "carrier": carrier,
@@ -201,11 +223,13 @@ async def load_context(state: AgentState) -> dict:
 
 async def validate(state: AgentState) -> dict:
     """
-    Run all deterministic rule checks that don't require contract disambiguation.
-    Contract-dependent checks (rate, FSC, base charge) are run here with the first
-    candidate and then re-run in resolve_ambiguity once the chosen contract is known.
+    Run deterministic checks that do not depend on the final contract choice.
+    Contract-dependent checks run only after resolve_ambiguity selects the contract,
+    so stale findings from an arbitrary first candidate cannot affect the decision.
     """
     bill = state["bill"]
+    bill_id = state["bill_id"]
+    logger.info("[%s] Stage=validate start", bill_id)
     findings: list[dict] = []
 
     # 1. Duplicate bill check
@@ -223,23 +247,7 @@ async def validate(state: AgentState) -> dict:
     # 3. Internal total consistency (base + fsc + gst = total)
     findings.append(_finding_to_dict(rules.check_total_amount(bill)))
 
-    # 4. Contract checks —  first pass with the first candidate
-    #    resolve_ambiguity will re-run these with the chosen contract
-    candidates = state.get("all_candidate_contracts", [])
-    first_contract = candidates[0] if candidates else None
-
-    findings.append(_finding_to_dict(
-        rules.check_contract_active(first_contract, bill.get("bill_date", ""))
-    ))
-
-    if first_contract:
-        rate_row = first_contract.get("matched_rate_row") or {}
-        findings.append(_finding_to_dict(rules.check_rate(bill, rate_row, bill.get("bill_date", ""))))
-        findings.append(_finding_to_dict(rules.check_fuel_surcharge(bill, rate_row, bill.get("bill_date", ""))))
-        findings.append(_finding_to_dict(rules.check_base_charge(bill, rate_row)))
-        findings.append(_finding_to_dict(rules.check_uom_mismatch(bill, rate_row)))
-
-    # 5. Weight vs BOL (always deterministic — not contract-dependent)
+    # 4. Weight vs BOL (always deterministic — not contract-dependent)
     findings.append(_finding_to_dict(rules.check_weight_vs_bol(
         bill,
         state.get("bols", []),
@@ -247,6 +255,9 @@ async def validate(state: AgentState) -> dict:
     )))
 
     audit = [{"event": "validation_complete", "finding_count": len(findings), "ts": _now()}]
+    err_count = len([f for f in findings if f.get("severity") == "error"])
+    warn_count = len([f for f in findings if f.get("severity") == "warn"])
+    logger.info("[%s] Stage=validate done findings=%d errors=%d warns=%d", bill_id, len(findings), err_count, warn_count)
     return {"findings": findings, "audit": audit}
 
 
@@ -259,12 +270,35 @@ async def resolve_ambiguity(state: AgentState) -> dict:
     Re-run contract-dependent checks with the chosen contract.
     """
     bill = state["bill"]
+    bill_id = state["bill_id"]
     candidates = state.get("all_candidate_contracts", [])
     audit = []
+    logger.info("[%s] Stage=resolve_ambiguity start candidates=%d", bill_id, len(candidates))
+
+    hard_blockers = [
+        f for f in state.get("findings", [])
+        if f.get("severity") == "error" and f.get("code") in HARD_STOP_CODES_FOR_LLM
+    ]
+    if hard_blockers:
+        blocker_codes = sorted({f.get("code") for f in hard_blockers})
+        logger.info("[%s] Stage=resolve_ambiguity skipped due to hard blockers=%s", bill_id, blocker_codes)
+        audit.append({
+            "event": "ambiguity_resolution_skipped",
+            "reason": "hard_blocker_findings",
+            "blockers": blocker_codes,
+            "ts": _now(),
+        })
+        return {"chosen_contract": None, "ambiguity_note": None, "findings": [], "audit": audit}
 
     if not candidates:
         # No contract found — nothing to resolve
-        return {"chosen_contract": None, "ambiguity_note": None, "findings": [], "audit": audit}
+        logger.info("[%s] Stage=resolve_ambiguity done no candidates", bill_id)
+        return {
+            "chosen_contract": None,
+            "ambiguity_note": None,
+            "findings": [_finding_to_dict(rules.check_contract_active(None, bill.get("bill_date", "")))],
+            "audit": audit,
+        }
 
     chosen: dict | None = None
     ambiguity_note: str | None = None
@@ -273,48 +307,61 @@ async def resolve_ambiguity(state: AgentState) -> dict:
         chosen = candidates[0]
         ambiguity_note = None
     else:
-        # Filter to contracts that are active on the bill date for LLM resolution
-        from app.agent.rules import _parse_date
-        bd = _parse_date(bill.get("bill_date", ""))
-        active_candidates = []
-        for c in candidates:
-            if c.get("status") == "expired":
-                continue
-            exp = _parse_date(c.get("expiry_date", ""))
-            eff = _parse_date(c.get("effective_date", ""))
-            if bd and exp and bd > exp:
-                continue
-            if bd and eff and bd < eff:
-                continue
-            active_candidates.append(c)
+        # Filter to contracts that are active and eligible on the bill date before LLM resolution.
+        active_candidates = [
+            c for c in candidates
+            if _contract_is_active_for_bill(c, bill.get("bill_date", ""))
+        ]
 
         if not active_candidates:
             active_candidates = candidates  # fall back to all if none are active
 
-        chosen, reasoning = await llm_service.resolve_ambiguous_contract(bill, active_candidates)
+        eligible_candidates = [
+            c for c in active_candidates
+            if _contract_meets_min_weight(bill, c)
+        ]
+        candidates_for_resolution = eligible_candidates or active_candidates
+
+        if len(candidates_for_resolution) != len(active_candidates):
+            audit.append({
+                "event": "contracts_filtered_by_min_weight",
+                "before": [c["id"] for c in active_candidates],
+                "after": [c["id"] for c in candidates_for_resolution],
+                "ts": _now(),
+            })
+
+        chosen, reasoning = await llm_service.resolve_ambiguous_contract(bill, candidates_for_resolution)
         ambiguity_note = reasoning
         audit.append({
             "event": "contract_ambiguity_resolved",
-            "candidates": [c["id"] for c in active_candidates],
+            "candidates": [c["id"] for c in candidates_for_resolution],
             "chosen": chosen["id"] if chosen else None,
             "reasoning": reasoning,
             "ts": _now(),
         })
+        logger.info("[%s] Stage=resolve_ambiguity llm_selected=%s from=%d", bill_id, chosen["id"] if chosen else None, len(candidates_for_resolution))
 
     if not chosen:
-        return {"chosen_contract": None, "ambiguity_note": ambiguity_note, "findings": [], "audit": audit}
+        logger.info("[%s] Stage=resolve_ambiguity done no chosen contract", bill_id)
+        return {
+            "chosen_contract": None,
+            "ambiguity_note": ambiguity_note,
+            "findings": [_finding_to_dict(rules.check_contract_active(None, bill.get("bill_date", "")))],
+            "audit": audit,
+        }
 
-    # Re-run rate/charge/uom checks with the definitive chosen contract
-    # These replace the preliminary checks done in validate()
+    # Run all contract-dependent checks with the definitive chosen contract.
     rate_row = chosen.get("matched_rate_row") or {}
     recheck_findings: list[dict] = []
 
     recheck_findings.append(_finding_to_dict(rules.check_contract_active(chosen, bill.get("bill_date", ""))))
+    recheck_findings.append(_finding_to_dict(rules.check_min_weight(bill, rate_row)))
     recheck_findings.append(_finding_to_dict(rules.check_rate(bill, rate_row, bill.get("bill_date", ""))))
     recheck_findings.append(_finding_to_dict(rules.check_fuel_surcharge(bill, rate_row, bill.get("bill_date", ""))))
     recheck_findings.append(_finding_to_dict(rules.check_base_charge(bill, rate_row)))
     recheck_findings.append(_finding_to_dict(rules.check_uom_mismatch(bill, rate_row)))
 
+    logger.info("[%s] Stage=resolve_ambiguity done chosen_contract=%s", bill_id, chosen.get("id"))
     return {
         "chosen_contract": chosen,
         "ambiguity_note": ambiguity_note,
@@ -335,6 +382,8 @@ async def decide(state: AgentState) -> dict:
     - dispute       → confidence <= dispute_threshold OR hard-error codes present
     - flag          → everything else (goes to human review)
     """
+    bill_id = state["bill_id"]
+    logger.info("[%s] Stage=decide start", bill_id)
     vr = ValidationResult()
 
     # De-duplicate findings: later findings (from re-check in resolve_ambiguity)
@@ -365,7 +414,10 @@ async def decide(state: AgentState) -> dict:
         for f in vr.findings
     )
 
-    if confidence >= settings.auto_approve_threshold and not vr.errors:
+    duplicate_error = any(f.code == "DUPLICATE_BILL" and f.severity == "error" for f in vr.findings)
+    if duplicate_error:
+        decision = "reject"
+    elif confidence >= settings.auto_approve_threshold and not vr.errors:
         decision = "auto_approve"
     elif confidence <= settings.dispute_threshold or hard_error:
         decision = "dispute"
@@ -380,11 +432,11 @@ async def decide(state: AgentState) -> dict:
         "warn_count": len(vr.warnings),
         "ts": _now(),
     }]
+    logger.info("[%s] Stage=decide done decision=%s confidence=%.3f errors=%d warns=%d", bill_id, decision, confidence, len(vr.errors), len(vr.warnings))
 
     return {
         "confidence": confidence,
         "decision": decision,
-        "findings": [_finding_to_dict(f) for f in deduped.values()],
         "audit": audit,
     }
 
@@ -398,8 +450,10 @@ async def human_review(state: AgentState) -> dict:
     with the reviewer's decision, which becomes the return value of interrupt().
     """
     logger.info(
-        f"Bill {state['bill_id']} paused for human review "
-        f"(confidence={state['confidence']:.2f}, decision={state['decision']})"
+        "[%s] Stage=human_review paused confidence=%.2f decision=%s",
+        state["bill_id"],
+        state["confidence"],
+        state["decision"],
     )
 
     reviewer_input = interrupt({
@@ -433,17 +487,37 @@ async def finalize(state: AgentState) -> dict:
     bill_id = state["bill_id"]
     decision = state.get("reviewer_decision") or state.get("decision", "flag")
     confidence = state.get("confidence", 0.0)
+    logger.info("[%s] Stage=finalize start decision=%s confidence=%.3f", bill_id, decision, confidence)
 
     findings_for_llm = [
         {"severity": f["severity"], "message": f["message"]}
         for f in state.get("findings", [])
     ]
 
-    explanation = await llm_service.generate_explanation(
-        bill_id, findings_for_llm, decision, confidence
-    )
+    deterministic_error_codes = {
+        "DUPLICATE_BILL",
+        "UNKNOWN_CARRIER",
+        "WEIGHT_MISMATCH",
+        "TOTAL_INCONSISTENT",
+    }
+    hard_errors = [
+        f for f in state.get("findings", [])
+        if f.get("severity") == "error" and f.get("code") in deterministic_error_codes
+    ]
+    if hard_errors:
+        top = hard_errors[0]
+        explanation = (
+            f"Freight bill {bill_id} {decision} due to deterministic validation failure: "
+            f"{top.get('message', top.get('code'))}."
+        )
+        logger.info("[%s] Stage=finalize skipped LLM explanation due to hard deterministic error", bill_id)
+    else:
+        explanation = await llm_service.generate_explanation(
+            bill_id, findings_for_llm, decision, confidence
+        )
 
     audit = [{"event": "finalized", "decision": decision, "ts": _now()}]
+    logger.info("[%s] Stage=finalize done", bill_id)
     return {"explanation": explanation, "decision": decision, "audit": audit}
 
 
@@ -451,10 +525,10 @@ async def finalize(state: AgentState) -> dict:
 
 def route_after_decide(state: AgentState) -> str:
     """
-    auto_approve → finalize directly (no human needed)
-    flag / dispute → human_review (interrupt, wait for POST /review/{id})
+    auto_approve / dispute / reject → finalize directly (no human needed)
+    flag → human_review (interrupt, wait for POST /review/{id})
     """
-    if state.get("decision") == "auto_approve":
+    if state.get("decision") in {"auto_approve", "dispute", "reject"}:
         return "finalize"
     return "human_review"
 

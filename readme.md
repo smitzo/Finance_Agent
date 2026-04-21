@@ -45,18 +45,30 @@ cp .env.example .env
 # then edit .env and set one LLM key:
 #   ANTHROPIC_API_KEY=...
 #   or OPENAI_API_KEY=...
+# Optional resilience toggles:
+#   LLM_CIRCUIT_BREAKER_COOLDOWN_SECONDS=60
+#   MAX_CONCURRENT_AGENT_RUNS=8
 
 # Load seed data
 python -m app.seed_loader
 
 # Run API
 uvicorn app.main:app --reload --port 8000
+
+# Logs are printed to terminal and written to:
+#   logs/app.log (with rotation)
 ```
 
 ### Run Tests
 
 ```bash
 python -m pytest app/tests/ -v
+```
+
+### Resilience Tests (bulk + quota protection)
+
+```bash
+python -m pytest app/tests/test_resilience.py -v
 ```
 
 ### Run Smoke Test
@@ -71,6 +83,21 @@ If your API runs on a different host/port:
 
 ```bash
 python scripts/smoke_test.py http://127.0.0.1:8000
+```
+
+### Demo and Admin Data
+
+With the API running, open Swagger UI at `http://localhost:8000/docs` and use the **Admin** endpoints:
+
+- `POST /admin/demo/load`: creates 20 demo freight bills with demo carriers, contracts, shipments, and BOLs, then queues all bills for agent processing. The first 10 are deterministic; the last 10 omit `carrier_id` and use overlapping contracts so LLM carrier normalization and ambiguity-resolution logs are exercised.
+- `DELETE /admin/demo`: deletes only records with demo prefixes (`DEMO-*`, `CAR-DEMO*`) and rebuilds the in-memory graph.
+- `DELETE /admin/data?confirm=DELETE_ALL`: deletes all carriers, contracts, shipments, BOLs, freight bills, and audit logs while keeping the schema intact.
+
+CLI alternative:
+
+```bash
+python scripts/demo_data.py load
+python scripts/demo_data.py clear
 ```
 
 ---
@@ -134,6 +161,10 @@ After deploy, open:
 | POST | `/review/{id}` | Submit reviewer decision, resume agent |
 | GET | `/metrics` | Agent performance summary |
 | GET | `/health` | Liveness check |
+| GET | `/health/db` | DB connectivity check (`SELECT 1`) |
+| POST | `/admin/demo/load` | Load and process demo data |
+| DELETE | `/admin/demo` | Remove demo data |
+| DELETE | `/admin/data?confirm=DELETE_ALL` | Remove all application data |
 
 ### Example: Ingest a bill
 
@@ -155,6 +186,47 @@ curl -X POST http://localhost:8000/freight-bills \
     "gst_amount": 2479.00,
     "total_amount": 16249.00
   }'
+```
+
+### Example: Bulk ingest (array payload)
+
+Use a JSON array (`[...]`), not comma-separated standalone objects:
+
+```bash
+curl -X POST http://localhost:8000/freight-bills \
+  -H "Content-Type: application/json" \
+  -d '[
+    {
+      "id": "FB-2025-101",
+      "carrier_id": "CAR001",
+      "carrier_name": "Safexpress Logistics",
+      "bill_number": "SFX/2025/00234",
+      "bill_date": "2025-02-15",
+      "shipment_reference": "SHP-2025-002",
+      "lane": "DEL-BLR",
+      "billed_weight_kg": 850,
+      "rate_per_kg": 15.00,
+      "base_charge": 12750.00,
+      "fuel_surcharge": 1020.00,
+      "gst_amount": 2479.00,
+      "total_amount": 16249.00
+    },
+    {
+      "id": "FB-2025-109",
+      "carrier_id": "CAR001",
+      "carrier_name": "Safexpress Logistics",
+      "bill_number": "SFX/2025/00234",
+      "bill_date": "2025-02-15",
+      "shipment_reference": "SHP-2025-002",
+      "lane": "DEL-BLR",
+      "billed_weight_kg": 850,
+      "rate_per_kg": 15.00,
+      "base_charge": 12750.00,
+      "fuel_surcharge": 1020.00,
+      "gst_amount": 2479.00,
+      "total_amount": 16249.00
+    }
+  ]'
 ```
 
 ### Example: Submit a review
@@ -234,6 +306,7 @@ if multiple contracts matched (ambiguity) → -0.15
 - Duplicate check (error = -0.25)
 - Carrier known (error = -0.25)
 - Contract active on bill date (error = -0.25)
+- Minimum weight eligibility when a contract rate row specifies `min_weight_kg`
 - Rate within 2% tolerance (error or warn depending on magnitude)
 - Fuel surcharge correct (handles mid-term revisions)
 - Base charge = weight × rate ≥ min_charge
