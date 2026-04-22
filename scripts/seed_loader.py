@@ -22,6 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import AsyncSessionLocal, engine
+from app.tenancy import normalize_tenant_id
 from app.models.db_models import (
     AuditLog,
     Base,
@@ -62,6 +63,7 @@ async def _exists(db: AsyncSession, model, pk: str) -> bool:
 
 async def _find_existing_bill_by_business_key(
     db: AsyncSession,
+    tenant_id: str,
     carrier_id: str | None,
     carrier_name: str | None,
     bill_number: str,
@@ -69,6 +71,7 @@ async def _find_existing_bill_by_business_key(
     if carrier_id:
         result = await db.execute(
             select(FreightBill).where(
+                FreightBill.tenant_id == tenant_id,
                 FreightBill.carrier_id == carrier_id,
                 FreightBill.bill_number == bill_number,
             )
@@ -80,7 +83,10 @@ async def _find_existing_bill_by_business_key(
     normalized_name = (carrier_name or "").strip().lower()
     if normalized_name:
         result = await db.execute(
-            select(FreightBill).where(FreightBill.bill_number == bill_number)
+            select(FreightBill).where(
+                FreightBill.tenant_id == tenant_id,
+                FreightBill.bill_number == bill_number,
+            )
         )
         for row in result.scalars().all():
             if (row.carrier_name or "").strip().lower() == normalized_name:
@@ -89,9 +95,11 @@ async def _find_existing_bill_by_business_key(
     return None
 
 
-async def load_seed(seed_path: Path | None = None) -> None:
+async def load_seed(seed_path: Path | None = None, tenant_id: str | None = None) -> None:
     seed_path = seed_path or resolve_seed_path()
+    tenant_id = normalize_tenant_id(tenant_id)
     print(f"Loading seed data from {seed_path} ...")
+    print(f"Tenant: {tenant_id}")
 
     with open(seed_path) as f:
         data = json.load(f)
@@ -105,6 +113,7 @@ async def load_seed(seed_path: Path | None = None) -> None:
         for c in data.get("carriers", []):
             if not await _exists(db, Carrier, c["id"]):
                 db.add(Carrier(
+                    tenant_id=c.get("tenant_id", tenant_id),
                     id=c["id"],
                     name=c["name"],
                     carrier_code=c["carrier_code"],
@@ -123,6 +132,7 @@ async def load_seed(seed_path: Path | None = None) -> None:
         for cc in data.get("carrier_contracts", []):
             if not await _exists(db, CarrierContract, cc["id"]):
                 db.add(CarrierContract(
+                    tenant_id=cc.get("tenant_id", tenant_id),
                     id=cc["id"],
                     carrier_id=cc["carrier_id"],
                     effective_date=cc["effective_date"],
@@ -141,6 +151,7 @@ async def load_seed(seed_path: Path | None = None) -> None:
         for s in data.get("shipments", []):
             if not await _exists(db, Shipment, s["id"]):
                 db.add(Shipment(
+                    tenant_id=s.get("tenant_id", tenant_id),
                     id=s["id"],
                     carrier_id=s["carrier_id"],
                     contract_id=s.get("contract_id"),
@@ -160,6 +171,7 @@ async def load_seed(seed_path: Path | None = None) -> None:
         for b in data.get("bills_of_lading", []):
             if not await _exists(db, BillOfLading, b["id"]):
                 db.add(BillOfLading(
+                    tenant_id=b.get("tenant_id", tenant_id),
                     id=b["id"],
                     shipment_id=b["shipment_id"],
                     delivery_date=b.get("delivery_date"),
@@ -180,6 +192,7 @@ async def load_seed(seed_path: Path | None = None) -> None:
 
             duplicate = await _find_existing_bill_by_business_key(
                 db,
+                tenant_id=fb.get("tenant_id", tenant_id),
                 carrier_id=fb.get("carrier_id"),
                 carrier_name=fb.get("carrier_name"),
                 bill_number=fb["bill_number"],
@@ -197,6 +210,7 @@ async def load_seed(seed_path: Path | None = None) -> None:
                 evidence["seed_scenario"] = fb["_scenario"]
 
             db.add(FreightBill(
+                tenant_id=fb.get("tenant_id", tenant_id),
                 id=fb["id"],
                 carrier_id=fb.get("carrier_id"),
                 carrier_name=fb["carrier_name"],
@@ -215,6 +229,7 @@ async def load_seed(seed_path: Path | None = None) -> None:
                 evidence=evidence or None,
             ))
             db.add(AuditLog(
+                tenant_id=fb.get("tenant_id", tenant_id),
                 freight_bill_id=fb["id"],
                 event="seed_bill_loaded",
                 detail={"source": "seed_loader"},
