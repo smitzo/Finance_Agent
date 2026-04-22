@@ -23,7 +23,7 @@ class GraphService:
     def __init__(self):
         self.G: nx.DiGraph = nx.DiGraph()
 
-    # ── Build ─────────────────────────────────────────────────────────────────
+    # Build 
 
     async def build(self, db: AsyncSession) -> None:
         """Load all reference data from Postgres and construct the graph."""
@@ -117,7 +117,7 @@ class GraphService:
             if self.G.has_node(shp_node):
                 self.G.add_edge(node_id, shp_node, rel="references")
 
-    # ── Query helpers ─────────────────────────────────────────────────────────
+    # Query helpers 
 
     def get_carrier_node(self, carrier_id: str) -> dict | None:
         return self.G.nodes.get(f"carrier:{carrier_id}")

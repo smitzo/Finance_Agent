@@ -47,14 +47,12 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
-# ── Agent State ───────────────────────────────────────────────────────────────
-
 class AgentState(TypedDict):
-    # Input
+    # takes input
     bill: dict                          # raw freight bill dict
     bill_id: str
 
-    # Context gathered during load_context
+    # context gathered during load_context
     carrier: dict | None
     carrier_id: str | None
     all_candidate_contracts: list[dict]
@@ -62,22 +60,22 @@ class AgentState(TypedDict):
     shipment: dict | None
     bols: list[dict]
     prior_billed_weight: float
-    existing_bill_ids: list[str]        # for duplicate check
+    existing_bill_ids: list[str]
 
-    # Validation
+    # validation
     findings: Annotated[list[dict], operator.add]   # accumulate across nodes
     ambiguity_note: str | None
 
-    # Decision
+    # decision
     confidence: float
     decision: str | None                # auto_approve | flag | dispute
     explanation: str | None
 
-    # Human review
+    # human review
     reviewer_decision: str | None
     reviewer_notes: str | None
 
-    # Audit trail
+    # audit trail
     audit: Annotated[list[dict], operator.add]
 
 
@@ -89,12 +87,10 @@ def _now() -> str:
     return datetime.utcnow().isoformat()
 
 
-# ── Node: load_context ────────────────────────────────────────────────────────
 
 async def load_context(state: AgentState) -> dict:
     """
-    Traverse the in-memory graph to pull all data needed for validation:
-    carrier, contracts covering the bill's lane, shipment, BOLs,
+    Traverse the in-memory graph to pull all data needed for validation: carrier, contracts covering the bill's lane, shipment, BOLs,
     and any prior freight bills for the same shipment.
     """
     graph = get_graph_service()
@@ -103,7 +99,6 @@ async def load_context(state: AgentState) -> dict:
 
     audit = [{"event": "load_context_start", "bill_id": bill_id, "ts": _now()}]
 
-    # ── Carrier resolution ────────────────────────────────────────────────────
     carrier_id = bill.get("carrier_id")
     carrier = None
 
@@ -128,12 +123,12 @@ async def load_context(state: AgentState) -> dict:
             carrier = graph.get_carrier_node(carrier_id)
             audit.append({"event": "carrier_fuzzy_matched", "matched_to": carrier_id, "ts": _now()})
 
-    # ── Contract resolution ───────────────────────────────────────────────────
+    # Contract resolution
     candidate_contracts: list[dict] = []
     if carrier_id and bill.get("lane"):
         candidate_contracts = graph.get_contracts_for_lane(carrier_id, bill["lane"])
 
-    # ── Shipment + BOL ────────────────────────────────────────────────────────
+    #  Shipment + BOL
     shipment = None
     bols: list[dict] = []
     if bill.get("shipment_reference"):
@@ -141,7 +136,7 @@ async def load_context(state: AgentState) -> dict:
         if shipment:
             bols = graph.get_bols_for_shipment(bill["shipment_reference"])
 
-    # ── Prior bills for same shipment (over-billing check) ────────────────────
+    # Prior bills for same shipment (over-billing check) 
     prior_billed_weight = 0.0
     dup_ids: list[str] = []
 
@@ -153,7 +148,7 @@ async def load_context(state: AgentState) -> dict:
             fb_node = graph.G.nodes.get(f"fb:{fid}", {})
             prior_billed_weight += fb_node.get("billed_weight_kg", 0)
 
-    # ── Duplicate check: same bill_number across all freight bills in graph ───
+    #  Duplicate check: same bill_number across all freight bills in graph 
     bill_number = bill.get("bill_number", "")
     incoming_carrier_id = carrier_id or bill.get("carrier_id")
     incoming_carrier_name = (bill.get("carrier_name") or "").strip().lower()
@@ -202,7 +197,7 @@ async def load_context(state: AgentState) -> dict:
     }
 
 
-# ── Node: validate ────────────────────────────────────────────────────────────
+# Node: validate 
 
 async def validate(state: AgentState) -> dict:
     """
@@ -228,7 +223,7 @@ async def validate(state: AgentState) -> dict:
     # 3. Internal total consistency (base + fsc + gst = total)
     findings.append(_finding_to_dict(rules.check_total_amount(bill)))
 
-    # 4. Contract checks — preliminary pass with the first candidate
+    # 4. Contract checks —  first pass with the first candidate
     #    resolve_ambiguity will re-run these with the chosen contract
     candidates = state.get("all_candidate_contracts", [])
     first_contract = candidates[0] if candidates else None
@@ -255,13 +250,13 @@ async def validate(state: AgentState) -> dict:
     return {"findings": findings, "audit": audit}
 
 
-# ── Node: resolve_ambiguity ───────────────────────────────────────────────────
+# Node: resolve_ambiguity
 
 async def resolve_ambiguity(state: AgentState) -> dict:
     """
     If there is exactly one candidate contract, confirm it.
     If multiple overlap, use the LLM to pick the best match given the bill details.
-    Re-runs contract-dependent checks with the chosen contract.
+    Re-run contract-dependent checks with the chosen contract.
     """
     bill = state["bill"]
     candidates = state.get("all_candidate_contracts", [])
@@ -328,7 +323,7 @@ async def resolve_ambiguity(state: AgentState) -> dict:
     }
 
 
-# ── Node: decide ──────────────────────────────────────────────────────────────
+# Node: decide 
 
 async def decide(state: AgentState) -> dict:
     """
@@ -394,7 +389,7 @@ async def decide(state: AgentState) -> dict:
     }
 
 
-# ── Node: human_review (interrupt) ───────────────────────────────────────────
+# Node: human_review (interrupt) 
 
 async def human_review(state: AgentState) -> dict:
     """
@@ -431,7 +426,7 @@ async def human_review(state: AgentState) -> dict:
     }
 
 
-# ── Node: finalize ────────────────────────────────────────────────────────────
+# Node: finalize 
 
 async def finalize(state: AgentState) -> dict:
     """Generate a plain-English explanation and write the final decision."""
@@ -452,7 +447,7 @@ async def finalize(state: AgentState) -> dict:
     return {"explanation": explanation, "decision": decision, "audit": audit}
 
 
-# ── Routing ───────────────────────────────────────────────────────────────────
+# Routing 
 
 def route_after_decide(state: AgentState) -> str:
     """
@@ -464,12 +459,11 @@ def route_after_decide(state: AgentState) -> str:
     return "human_review"
 
 
-# ── Build Graph ───────────────────────────────────────────────────────────────
+# Build Graph 
 
 def build_agent(checkpointer=None):
     """
-    Build and compile the LangGraph agent.
-    Pass a checkpointer to enable state persistence across interrupt/resume cycles.
+    Build and compile the LangGraph agent. Pass a checkpointer to enable state persistence across interrupt/resume cycles.
     """
     builder = StateGraph(AgentState)
 

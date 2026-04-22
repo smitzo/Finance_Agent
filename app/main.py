@@ -1,12 +1,12 @@
 """
-Application Entry Point
-=======================
-Creates the FastAPI app, initializes DB schema, and builds the in-memory graph.
+Application Entry Point: Creates the FastAPI app, initializes DB schema, and builds the in-memory graph.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import sys
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +19,10 @@ from app.services.graph_service import get_graph_service
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
+
+if sys.platform == "win32":
+    # Reduces noisy SSL shutdown errors seen with Proactor loop on Python 3.10.
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 app = FastAPI(
     title=settings.app_name,

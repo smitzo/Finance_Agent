@@ -11,6 +11,9 @@ from scripts.seed_loader import load_seed, resolve_seed_path
 
 
 def main() -> None:
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
     cli_path = sys.argv[1] if len(sys.argv) > 1 else None
     asyncio.run(load_seed(resolve_seed_path(cli_path)))
 

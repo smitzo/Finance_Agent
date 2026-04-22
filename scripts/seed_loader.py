@@ -1,7 +1,7 @@
 """
 Seed Loader
 ===========
-Loads seed_data_logistics.json into Postgres.
+Loads logistics seed data into Postgres.
 Run once after `docker-compose up`:
 
     python scripts/seed_loader.py
@@ -25,6 +25,7 @@ from app.models.db_models import Base, Carrier, CarrierContract, Shipment, BillO
 
 PROJECT_ROOT = Path(__file__).parent.parent
 SEED_FILE_CANDIDATES = [
+    PROJECT_ROOT / "seed_data.json",
     PROJECT_ROOT / "seed_data_logistics.json",
     PROJECT_ROOT / "seed data logistics.json",
 ]
@@ -138,5 +139,8 @@ async def load_seed(seed_path: Path | None = None) -> None:
 
 
 if __name__ == "__main__":
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
     cli_path = sys.argv[1] if len(sys.argv) > 1 else None
     asyncio.run(load_seed(resolve_seed_path(cli_path)))
