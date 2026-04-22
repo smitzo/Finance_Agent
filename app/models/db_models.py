@@ -19,7 +19,7 @@ class Base(DeclarativeBase):
     pass
 
 
-# ── Reference data (loaded from seed) ────────────────────────────────────────
+# Reference data (loaded from seed) 
 
 class Carrier(Base):
     __tablename__ = "carriers"

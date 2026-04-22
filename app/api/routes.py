@@ -1,7 +1,5 @@
 """
-API Routes
-==========
-HTTP endpoints for freight bill ingestion, review, and observability.
+API Routes: HTTP endpoints for freight bill ingestion, review, and observability.
 """
 
 from __future__ import annotations

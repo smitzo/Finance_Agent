@@ -2,6 +2,8 @@
 
 A stateful LangGraph agent that automatically validates carrier freight bills against contracts, shipments, and bills of lading — with human-in-the-loop review for low-confidence cases.
 
+Check it out at: https://finance-agent-889865964505.europe-west1.run.app/docs
+
 ---
 
 ## Quick Start
@@ -10,7 +12,7 @@ A stateful LangGraph agent that automatically validates carrier freight bills ag
 
 ```bash
 # 1. Clone / unzip the project
-cd freight-processor
+cd finance_agent
 
 # 2. Add your LLM key
 cp .env.example .env
@@ -28,14 +30,24 @@ docker-compose up --build
 ```bash
 # Prerequisites: Python 3.12+, Postgres running locally
 
+python -m venv .venv
+# Linux/macOS
+source .venv/bin/activate
+# Windows PowerShell
+# .\.venv\Scripts\Activate.ps1
+
 pip install -r requirements.txt
 
-# Set env vars
-export DATABASE_URL="postgresql+asyncpg://user:pass@localhost:5432/freight_db"
-export ANTHROPIC_API_KEY="sk-ant-..."
+# Create env file
+cp .env.example .env
+# Windows PowerShell:
+# Copy-Item .env.example .env
+# then edit .env and set one LLM key:
+#   ANTHROPIC_API_KEY=...
+#   or OPENAI_API_KEY=...
 
 # Load seed data
-python -m app.seed_loader seed_data_logistics.json
+python -m app.seed_loader
 
 # Run API
 uvicorn app.main:app --reload --port 8000
@@ -44,10 +56,71 @@ uvicorn app.main:app --reload --port 8000
 ### Run Tests
 
 ```bash
-pytest app/tests/ -v
+python -m pytest app/tests/ -v
+```
+
+### Run Smoke Test
+
+With API running locally:
+
+```bash
+python scripts/smoke_test.py
+```
+
+If your API runs on a different host/port:
+
+```bash
+python scripts/smoke_test.py http://127.0.0.1:8000
 ```
 
 ---
+
+## Deploy on GCP (Cloud Run + Secret Manager)
+
+You do not need a `.env` file in production. Use Secret Manager and inject secrets as environment variables at deploy time.
+
+```bash
+# 0) Set your values
+export PROJECT_ID="your-gcp-project-id"
+export REGION="us-central1"
+export REPO="freight-api"
+export IMAGE="freight-bill-processor"
+export SERVICE="freight-bill-processor"
+
+# 1) Enable required APIs
+gcloud services enable run.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com --project $PROJECT_ID
+
+# 2) Artifact Registry (one-time)
+gcloud artifacts repositories create $REPO --repository-format=docker --location=$REGION --project=$PROJECT_ID
+gcloud auth configure-docker ${REGION}-docker.pkg.dev
+
+# 3) Build & push image
+docker build -t ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${IMAGE}:v1 .
+docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${IMAGE}:v1
+
+# 4) Create/update secrets (examples)
+printf "postgresql+asyncpg://USER:PASS@HOST:5432/DB?ssl=require" | gcloud secrets create DATABASE_URL --data-file=- --project $PROJECT_ID || true
+printf "your-openai-key" | gcloud secrets create OPENAI_API_KEY --data-file=- --project $PROJECT_ID || true
+printf "openai" | gcloud secrets create LLM_PROVIDER --data-file=- --project $PROJECT_ID || true
+
+# Add new versions if secret already exists
+printf "postgresql+asyncpg://USER:PASS@HOST:5432/DB?ssl=require" | gcloud secrets versions add DATABASE_URL --data-file=- --project $PROJECT_ID
+printf "your-openai-key" | gcloud secrets versions add OPENAI_API_KEY --data-file=- --project $PROJECT_ID
+printf "openai" | gcloud secrets versions add LLM_PROVIDER --data-file=- --project $PROJECT_ID
+
+# 5) Deploy Cloud Run service
+gcloud run deploy $SERVICE \
+  --image ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${IMAGE}:v1 \
+  --platform managed \
+  --region $REGION \
+  --allow-unauthenticated \
+  --set-secrets DATABASE_URL=DATABASE_URL:latest,OPENAI_API_KEY=OPENAI_API_KEY:latest,LLM_PROVIDER=LLM_PROVIDER:latest
+```
+
+After deploy, open:
+- `https://<cloud-run-url>/docs` for Swagger UI
+- `https://<cloud-run-url>/health` for liveness
+
 
 ## API Reference
 

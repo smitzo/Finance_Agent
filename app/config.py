@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # Database — async driver required
-    database_url: str = "postgresql+asyncpg://freight:freight@localhost:5432/freight_db"
+    database_url: str = "postgresql+asyncpg://freight:freight_pass@localhost:5432/freight_db"
 
     # LLM — at least one key required for LLM features
     llm_provider: str = "anthropic"          # "openai" | "anthropic"

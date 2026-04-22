@@ -42,7 +42,7 @@ class ValidationResult:
         self.findings.append(finding)
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# Helpers 
 
 def _parse_date(s: str) -> date | None:
     try:
@@ -57,7 +57,7 @@ def _within_tolerance(actual: float, expected: float) -> bool:
     return abs(actual - expected) / expected <= TOLERANCE
 
 
-# ── Individual checks ─────────────────────────────────────────────────────────
+# Individual checks 
 
 def check_duplicate(bill_number: str, carrier_id: str, existing_bill_ids: list[str]) -> Finding:
     if existing_bill_ids:
@@ -319,7 +319,6 @@ def check_total_amount(bill: dict) -> Finding:
 def compute_confidence(result: ValidationResult) -> float:
     """
     Score from 0.0 to 1.0 based on findings.
-
     - Start at 1.0
     - Each error deducts 0.25 (floored at 0)
     - Each warning deducts 0.08
