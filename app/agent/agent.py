@@ -53,6 +53,7 @@ class AgentState(TypedDict):
     # takes input
     bill: dict                          # raw freight bill dict
     bill_id: str
+    tenant_id: str
 
     # context gathered during load_context
     carrier: dict | None
@@ -101,12 +102,13 @@ def _contract_meets_min_weight(bill: dict, contract: dict) -> bool:
 
 async def load_context(state: AgentState) -> dict:
     """
-    Traverse the in-memory graph to pull all data needed for validation: carrier, contracts covering the bill's lane, shipment, BOLs,
+    Traverse the tenant-scoped graph to pull all data needed for validation: carrier, contracts covering the bill's lane, shipment, BOLs,
     and any prior freight bills for the same shipment.
     """
     graph = get_graph_service()
     bill = state["bill"]
     bill_id = state["bill_id"]
+    tenant_id = state.get("tenant_id", "default")
     logger.info("[%s] Stage=load_context start", bill_id)
 
     audit = [{"event": "load_context_start", "bill_id": bill_id, "ts": _now()}]
@@ -115,75 +117,57 @@ async def load_context(state: AgentState) -> dict:
     carrier = None
 
     if carrier_id:
-        carrier = graph.get_carrier_node(carrier_id)
+        carrier = await graph.get_carrier_node(tenant_id, carrier_id)
 
     # If carrier_id is present but unknown, do not call LLM:
     # this is a deterministic unknown-carrier case.
     # Only fuzzy match when carrier_id is absent.
     if not carrier and not carrier_id and bill.get("carrier_name"):
-        all_carriers_proper = []
-        for nid, ndata in graph.G.nodes(data=True):
-            if ndata.get("type") == "carrier":
-                all_carriers_proper.append({
-                    "id": nid.replace("carrier:", ""),
-                    "name": ndata.get("name", ""),
-                })
+        all_carriers_proper = await graph.list_carriers(tenant_id)
 
         matched_id = await llm_service.normalize_carrier_name(
             bill["carrier_name"], all_carriers_proper
         )
         if matched_id:
             carrier_id = matched_id
-            carrier = graph.get_carrier_node(carrier_id)
+            carrier = await graph.get_carrier_node(tenant_id, carrier_id)
             audit.append({"event": "carrier_fuzzy_matched", "matched_to": carrier_id, "ts": _now()})
 
     # Contract resolution
     candidate_contracts: list[dict] = []
     if carrier_id and bill.get("lane"):
-        candidate_contracts = graph.get_contracts_for_lane(carrier_id, bill["lane"])
+        candidate_contracts = await graph.get_contracts_for_lane(tenant_id, carrier_id, bill["lane"])
 
     #  Shipment + BOL
     shipment = None
     bols: list[dict] = []
     if bill.get("shipment_reference"):
-        shipment = graph.get_shipment_node(bill["shipment_reference"])
+        shipment = await graph.get_shipment_node(tenant_id, bill["shipment_reference"])
         if shipment:
-            bols = graph.get_bols_for_shipment(bill["shipment_reference"])
+            bols = await graph.get_bols_for_shipment(tenant_id, bill["shipment_reference"])
 
     # Prior bills for same shipment (over-billing check) 
     prior_billed_weight = 0.0
     dup_ids: list[str] = []
 
     if bill.get("shipment_reference"):
-        prior_fb_ids = graph.get_freight_bills_for_shipment(bill["shipment_reference"])
+        prior_fb_ids = await graph.get_freight_bills_for_shipment(tenant_id, bill["shipment_reference"])
         prior_fb_ids = [fid for fid in prior_fb_ids if fid != bill_id]
 
         for fid in prior_fb_ids:
-            fb_node = graph.G.nodes.get(f"fb:{fid}", {})
+            fb_node = await graph.get_freight_bill_node(tenant_id, fid) or {}
             prior_billed_weight += fb_node.get("billed_weight_kg", 0)
 
     #  Duplicate check: same bill_number across all freight bills in graph 
     bill_number = bill.get("bill_number", "")
     incoming_carrier_id = carrier_id or bill.get("carrier_id")
-    incoming_carrier_name = (bill.get("carrier_name") or "").strip().lower()
-    for nid, ndata in graph.G.nodes(data=True):
-        node_carrier_id = ndata.get("carrier_id")
-        node_carrier_name = (ndata.get("carrier_name") or "").strip().lower()
-        same_carrier = False
-        if incoming_carrier_id and node_carrier_id:
-            same_carrier = incoming_carrier_id == node_carrier_id
-        elif incoming_carrier_name and node_carrier_name:
-            same_carrier = incoming_carrier_name == node_carrier_name
-        else:
-            same_carrier = not incoming_carrier_id and not incoming_carrier_name
-
-        if (
-            ndata.get("type") == "freight_bill"
-            and ndata.get("bill_number") == bill_number
-            and same_carrier
-            and ndata.get("id") != bill_id
-        ):
-            dup_ids.append(ndata.get("id", nid))
+    dup_ids = await graph.find_duplicate_bill_ids(
+        tenant_id=tenant_id,
+        bill_number=bill_number,
+        carrier_id=incoming_carrier_id,
+        carrier_name=bill.get("carrier_name"),
+        exclude_bill_id=bill_id,
+    )
 
     audit.append({
         "event": "context_loaded",
@@ -206,6 +190,7 @@ async def load_context(state: AgentState) -> dict:
 
     return {
         "carrier": carrier,
+        "tenant_id": tenant_id,
         "carrier_id": carrier_id,
         "all_candidate_contracts": candidate_contracts,
         "chosen_contract": None,
