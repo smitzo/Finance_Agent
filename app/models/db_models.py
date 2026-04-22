@@ -1,15 +1,15 @@
 """
 SQLAlchemy ORM models.
 
-Relational layer stores freight bills, decisions, and audit trail.
-Graph relationships are maintained in-memory via NetworkX (built at startup from
-the same Postgres tables — no separate graph DB needed for this scale).
+Relational layer stores tenant-scoped freight data, decisions, and audit trail.
+Neo4j is the production graph traversal store; the relational tables remain the
+source of truth for billing workflow state.
 """
 
 from datetime import datetime
 from sqlalchemy import (
     Column, String, Integer, Float, Boolean, DateTime, Text, JSON,
-    ForeignKey, Enum as SAEnum, UniqueConstraint,
+    ForeignKey, Enum as SAEnum, UniqueConstraint, Index,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 import enum
@@ -23,8 +23,13 @@ class Base(DeclarativeBase):
 
 class Carrier(Base):
     __tablename__ = "carriers"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "carrier_code", name="uq_carriers_tenant_code"),
+        Index("ix_carriers_tenant_status", "tenant_id", "status"),
+    )
 
     id = Column(String, primary_key=True)
+    tenant_id = Column(String(64), nullable=False, default="default", server_default="default", index=True)
     name = Column(String, nullable=False)
     carrier_code = Column(String(10), nullable=False)
     gstin = Column(String(20))
@@ -38,8 +43,12 @@ class Carrier(Base):
 
 class CarrierContract(Base):
     __tablename__ = "carrier_contracts"
+    __table_args__ = (
+        Index("ix_contracts_tenant_carrier_status", "tenant_id", "carrier_id", "status"),
+    )
 
     id = Column(String, primary_key=True)
+    tenant_id = Column(String(64), nullable=False, default="default", server_default="default", index=True)
     carrier_id = Column(String, ForeignKey("carriers.id"), nullable=False)
     effective_date = Column(String(20), nullable=False)
     expiry_date = Column(String(20), nullable=False)
@@ -53,8 +62,12 @@ class CarrierContract(Base):
 
 class Shipment(Base):
     __tablename__ = "shipments"
+    __table_args__ = (
+        Index("ix_shipments_tenant_carrier_lane", "tenant_id", "carrier_id", "lane"),
+    )
 
     id = Column(String, primary_key=True)
+    tenant_id = Column(String(64), nullable=False, default="default", server_default="default", index=True)
     carrier_id = Column(String, ForeignKey("carriers.id"), nullable=False)
     contract_id = Column(String, ForeignKey("carrier_contracts.id"), nullable=True)
     lane = Column(String(30), nullable=False)
@@ -70,8 +83,12 @@ class Shipment(Base):
 
 class BillOfLading(Base):
     __tablename__ = "bills_of_lading"
+    __table_args__ = (
+        Index("ix_bols_tenant_shipment", "tenant_id", "shipment_id"),
+    )
 
     id = Column(String, primary_key=True)
+    tenant_id = Column(String(64), nullable=False, default="default", server_default="default", index=True)
     shipment_id = Column(String, ForeignKey("shipments.id"), nullable=False)
     delivery_date = Column(String(20))
     actual_weight_kg = Column(Float)
@@ -94,10 +111,13 @@ class FreightBillStatus(str, enum.Enum):
 class FreightBill(Base):
     __tablename__ = "freight_bills"
     __table_args__ = (
-        UniqueConstraint("carrier_id", "bill_number", name="uq_freight_bills_carrier_bill_number"),
+        UniqueConstraint("tenant_id", "carrier_id", "bill_number", name="uq_freight_bills_tenant_carrier_bill_number"),
+        Index("ix_freight_bills_tenant_status_created", "tenant_id", "status", "created_at"),
+        Index("ix_freight_bills_tenant_shipment", "tenant_id", "shipment_reference"),
     )
 
     id = Column(String, primary_key=True)
+    tenant_id = Column(String(64), nullable=False, default="default", server_default="default", index=True)
     carrier_id = Column(String, nullable=True)
     carrier_name = Column(String, nullable=False)
     bill_number = Column(String, nullable=False)
@@ -137,8 +157,12 @@ class FreightBill(Base):
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
+    __table_args__ = (
+        Index("ix_audit_logs_tenant_bill_created", "tenant_id", "freight_bill_id", "created_at"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String(64), nullable=False, default="default", server_default="default", index=True)
     freight_bill_id = Column(String, ForeignKey("freight_bills.id"), nullable=False)
     event = Column(String(80), nullable=False)
     detail = Column(JSON, nullable=True)
