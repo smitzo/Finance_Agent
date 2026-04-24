@@ -104,5 +104,14 @@ async def startup() -> None:
 
     async with AsyncSessionLocal() as db:
         graph_service = get_graph_service()
-        await graph_service.build(db)
-        logger.info("Startup: graph built successfully")
+        await graph_service.build(db, settings.default_tenant_id)
+        logger.info("Startup: graph built successfully for tenant=%s", settings.default_tenant_id)
+
+
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    graph_service = get_graph_service()
+    close = getattr(graph_service.backend, "close", None)
+    if close:
+        await close()
+        logger.info("Shutdown: graph backend closed")
