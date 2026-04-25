@@ -46,6 +46,7 @@ class FreightBillIn(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     id: str | None = None
+    workflow_type: str = "freight_audit"
     carrier_id: str | None = None
     carrier_name: str
     bill_number: str
@@ -70,6 +71,7 @@ class FreightBillOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    workflow_type: str
     carrier_name: str
     bill_number: str
     bill_date: str
@@ -226,6 +228,7 @@ async def _ingest_one_bill(
         }
     extra_keys = sorted(set(bill_data.keys()) - {
         "id",
+        "workflow_type",
         "carrier_id",
         "carrier_name",
         "bill_number",
@@ -426,6 +429,7 @@ async def get_freight_bill(
         raise HTTPException(status_code=404, detail=f"Freight bill {bill_id} not found")
     return FreightBillOut(
         id=fb.id,
+        workflow_type=fb.workflow_type,
         carrier_name=fb.carrier_name,
         bill_number=fb.bill_number,
         bill_date=fb.bill_date,
@@ -452,6 +456,7 @@ async def list_freight_bills(
     return [
         {
             "id": fb.id,
+            "workflow_type": fb.workflow_type,
             "carrier_name": fb.carrier_name,
             "bill_number": fb.bill_number,
             "lane": fb.lane,
@@ -473,6 +478,7 @@ async def review_queue(
     return [
         {
             "id": fb.id,
+            "workflow_type": fb.workflow_type,
             "carrier_name": fb.carrier_name,
             "bill_number": fb.bill_number,
             "lane": fb.lane,

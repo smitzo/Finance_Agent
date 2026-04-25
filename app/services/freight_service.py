@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 INGEST_ALLOWED_FIELDS = {
     "id",
     "tenant_id",
+    "workflow_type",
     "carrier_id",
     "carrier_name",
     "bill_number",
