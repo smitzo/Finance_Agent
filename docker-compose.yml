@@ -22,7 +22,7 @@ services:
       NEO4J_DATABASE: ${NEO4J_DATABASE:-neo4j}
       LOG_LEVEL: INFO
     command: >
-      sh -c "python scripts/seed_loader.py && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+      sh -c "alembic upgrade head && python scripts/seed_loader.py && uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
   neo4j:
     image: neo4j:5.26-community
