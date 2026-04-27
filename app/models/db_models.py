@@ -113,11 +113,13 @@ class FreightBill(Base):
     __table_args__ = (
         UniqueConstraint("tenant_id", "carrier_id", "bill_number", name="uq_freight_bills_tenant_carrier_bill_number"),
         Index("ix_freight_bills_tenant_status_created", "tenant_id", "status", "created_at"),
+        Index("ix_freight_bills_tenant_workflow_status", "tenant_id", "workflow_type", "status"),
         Index("ix_freight_bills_tenant_shipment", "tenant_id", "shipment_reference"),
     )
 
     id = Column(String, primary_key=True)
     tenant_id = Column(String(64), nullable=False, default="default", server_default="default", index=True)
+    workflow_type = Column(String(50), nullable=False, default="freight_audit", server_default="freight_audit")
     carrier_id = Column(String, nullable=True)
     carrier_name = Column(String, nullable=False)
     bill_number = Column(String, nullable=False)
