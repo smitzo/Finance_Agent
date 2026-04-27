@@ -558,9 +558,17 @@ class Neo4jGraphBackend:
 class GraphService:
     def __init__(self, backend: GraphBackend | None = None) -> None:
         self.backend = backend or MemoryGraphBackend()
+        self._built_tenants: set[str] = set()
 
     async def build(self, db: AsyncSession, tenant_id: str = "default") -> None:
-        await self.backend.build(db, normalize_tenant_id(tenant_id))
+        tenant_id = normalize_tenant_id(tenant_id)
+        await self.backend.build(db, tenant_id)
+        self._built_tenants.add(tenant_id)
+
+    async def ensure_built(self, db: AsyncSession, tenant_id: str = "default") -> None:
+        tenant_id = normalize_tenant_id(tenant_id)
+        if tenant_id not in self._built_tenants:
+            await self.build(db, tenant_id)
 
     async def add_freight_bill(self, tenant_id: str, fb_id: str, fb_data: dict) -> None:
         await self.backend.add_freight_bill(normalize_tenant_id(tenant_id), fb_id, fb_data)

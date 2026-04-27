@@ -97,6 +97,8 @@ async def run_agent_for_bill(bill_id: str, bill_dict: dict) -> None:
         config = {"configurable": {"thread_id": thread_id}}
 
         graph_service = get_graph_service()
+        async with AsyncSessionLocal() as db:
+            await graph_service.ensure_built(db, tenant_id)
         await graph_service.add_freight_bill(tenant_id, bill_id, {**bill_dict, "id": bill_id})
 
         initial_state = {
