@@ -67,6 +67,20 @@ class Settings(BaseSettings):
             return DEFAULT_DATABASE_URL
         return value
 
+    @field_validator("debug", mode="before")
+    @classmethod
+    def normalize_debug(cls, value: bool | str | None) -> bool:
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return False
+        normalized = str(value).strip().lower()
+        if normalized in {"1", "true", "yes", "on", "debug"}:
+            return True
+        if normalized in {"0", "false", "no", "off", "release", "prod", "production"}:
+            return False
+        return False
+
 
 @lru_cache
 def get_settings() -> Settings:
