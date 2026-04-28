@@ -35,6 +35,7 @@ class GraphBackend(Protocol):
     async def get_bols_for_shipment(self, tenant_id: str, shipment_id: str) -> list[dict]: ...
     async def get_freight_bill_node(self, tenant_id: str, fb_id: str) -> dict | None: ...
     async def get_freight_bills_for_shipment(self, tenant_id: str, shipment_id: str) -> list[str]: ...
+    async def health(self) -> dict: ...
     async def find_duplicate_bill_ids(
         self,
         tenant_id: str,
@@ -239,6 +240,9 @@ class MemoryGraphBackend:
                 duplicates.append(data.get("id", node_id.replace("fb:", "")))
         return duplicates
 
+    async def health(self) -> dict:
+        return {"backend": "memory", "status": "ok", "tenants_loaded": len(self._nodes)}
+
 
 class Neo4jGraphBackend:
     """Neo4j-backed graph traversal store for production workloads."""
@@ -256,6 +260,10 @@ class Neo4jGraphBackend:
 
     async def close(self) -> None:
         await self._driver.close()
+
+    async def health(self) -> dict:
+        await self._driver.verify_connectivity()
+        return {"backend": "neo4j", "status": "ok", "database": self._database}
 
     async def _execute(self, query: str, **params):
         async with self._driver.session(database=self._database) as session:
@@ -609,6 +617,9 @@ class GraphService:
             carrier_name,
             exclude_bill_id,
         )
+
+    async def health(self) -> dict:
+        return await self.backend.health()
 
 
 _graph_service: GraphService | None = None
