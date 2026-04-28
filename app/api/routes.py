@@ -184,11 +184,20 @@ async def run_agent_for_bill(bill_id: str, bill_dict: dict) -> None:
                         await db.commit()
 
 
+async def run_agent_batch(bill_items: list[dict]) -> None:
+    """Run accepted bills in bounded chunks instead of creating one background task per bill."""
+    batch_size = max(1, settings.bulk_ingest_batch_size)
+    for start in range(0, len(bill_items), batch_size):
+        chunk = bill_items[start:start + batch_size]
+        await asyncio.gather(*(run_agent_for_bill(item["id"], item) for item in chunk))
+
+
 async def _ingest_one_bill(
     payload: FreightBillIn,
     background_tasks: BackgroundTasks,
     db: AsyncSession,
     tenant_id: str,
+    queue_agent: bool = True,
 ) -> dict:
     bill_id = payload.id or f"FB-{uuid.uuid4().hex[:8].upper()}"
 
@@ -250,12 +259,14 @@ async def _ingest_one_bill(
     db.add(AuditLog(tenant_id=tenant_id, freight_bill_id=bill_id, event="bill_ingested", detail={"source": "api"}))
     await db.commit()
 
-    background_tasks.add_task(run_agent_for_bill, bill_id, bill_data)
+    if queue_agent:
+        background_tasks.add_task(run_agent_for_bill, bill_id, bill_data)
     return {
         "id": bill_id,
         "accepted": True,
         "status": "processing",
         "message": "Bill ingested — agent processing started",
+        "_bill_data": bill_data,
     }
 
 
@@ -393,9 +404,13 @@ async def ingest_freight_bill(
         raise HTTPException(status_code=400, detail="Payload list is empty")
 
     results: list[dict] = []
+    accepted_bill_items: list[dict] = []
     for item in payload:
         try:
-            result = await _ingest_one_bill(item, background_tasks, db)
+            result = await _ingest_one_bill(item, background_tasks, db, tenant_id, queue_agent=False)
+            if result.get("accepted") and result.get("_bill_data"):
+                accepted_bill_items.append(result["_bill_data"])
+            result.pop("_bill_data", None)
             results.append(result)
         except Exception as exc:
             await db.rollback()
@@ -410,6 +425,8 @@ async def ingest_freight_bill(
 
     accepted = sum(1 for r in results if r.get("accepted"))
     rejected = len(results) - accepted
+    if accepted_bill_items:
+        background_tasks.add_task(run_agent_batch, accepted_bill_items)
     return {
         "total": len(results),
         "accepted": accepted,
