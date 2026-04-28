@@ -108,7 +108,7 @@ async def _call_llm(prompt: str, max_tokens: int = 500, operation: str = "generi
             logger.info("LLM input operation=%s prompt=%s", operation, _truncate(prompt))
         if provider == "openai":
             request_payload = {
-                "model": "gpt-4o-mini",
+                "model": settings.llm_openai_model,
                 "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": max_tokens,
                 "temperature": 0,
@@ -141,41 +141,39 @@ async def _call_llm(prompt: str, max_tokens: int = 500, operation: str = "generi
                 )
             return result
         else:  # anthropic
-            pass
-            # request_payload = {
-            #     "model": "claude-haiku-4-5-20251001",
-            #     "max_tokens": max_tokens,
-            #     "messages": [{"role": "user", "content": prompt}],
-            # }
-            # if settings.llm_debug_payloads:
-            #     logger.info(
-            #         "LLM Anthropic request operation=%s payload=%s",
-            #         operation,
-            #         _truncate(json.dumps(request_payload, ensure_ascii=False)),
-            #     )
-            # resp = await client.messages.create(
-            #     **request_payload,
-            # )
-            # result = resp.content[0].text.strip()
-            # logger.info("LLM call success operation=%s provider=%s", operation, provider)
-            # if settings.llm_debug_payloads:
-            #     usage_dump = None
-            #     try:
-            #         usage_dump = resp.usage.model_dump() if resp.usage else None
-            #     except Exception:
-            #         usage_dump = str(resp.usage)
-            #     response_payload = {
-            #         "id": getattr(resp, "id", None),
-            #         "model": getattr(resp, "model", None),
-            #         "usage": usage_dump,
-            #         "content": result,
-            #     }
-            #     logger.info(
-            #         "LLM Anthropic response operation=%s payload=%s",
-            #         operation,
-            #         _truncate(json.dumps(response_payload, ensure_ascii=False)),
-            #     )
-            # return result
+            request_payload = {
+                "model": settings.llm_anthropic_model,
+                "max_tokens": max_tokens,
+                "temperature": 0,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+            if settings.llm_debug_payloads:
+                logger.info(
+                    "LLM Anthropic request operation=%s payload=%s",
+                    operation,
+                    _truncate(json.dumps(request_payload, ensure_ascii=False)),
+                )
+            resp = await client.messages.create(**request_payload)
+            result = resp.content[0].text.strip()
+            logger.info("LLM call success operation=%s provider=%s", operation, provider)
+            if settings.llm_debug_payloads:
+                usage_dump = None
+                try:
+                    usage_dump = resp.usage.model_dump() if resp.usage else None
+                except Exception:
+                    usage_dump = str(resp.usage)
+                response_payload = {
+                    "id": getattr(resp, "id", None),
+                    "model": getattr(resp, "model", None),
+                    "usage": usage_dump,
+                    "content": result,
+                }
+                logger.info(
+                    "LLM Anthropic response operation=%s payload=%s",
+                    operation,
+                    _truncate(json.dumps(response_payload, ensure_ascii=False)),
+                )
+            return result
     except Exception as e:
         if _looks_like_quota_or_rate_limit_error(e):
             _open_llm_circuit(str(e))

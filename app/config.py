@@ -33,6 +33,8 @@ class Settings(BaseSettings):
 
     # LLM — at least one key required for LLM features
     llm_provider: str = "anthropic"          # "openai" | "anthropic"
+    llm_openai_model: str = "gpt-4o-mini"
+    llm_anthropic_model: str = "claude-3-5-haiku-latest"
     openai_api_key: str = ""
     anthropic_api_key: str = ""
     llm_debug_payloads: bool = False
