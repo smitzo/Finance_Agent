@@ -71,6 +71,7 @@ class FreightBillOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    tenant_id: str
     workflow_type: str
     carrier_name: str
     bill_number: str
@@ -446,6 +447,7 @@ async def get_freight_bill(
         raise HTTPException(status_code=404, detail=f"Freight bill {bill_id} not found")
     return FreightBillOut(
         id=fb.id,
+        tenant_id=fb.tenant_id,
         workflow_type=fb.workflow_type,
         carrier_name=fb.carrier_name,
         bill_number=fb.bill_number,
@@ -473,6 +475,7 @@ async def list_freight_bills(
     return [
         {
             "id": fb.id,
+            "tenant_id": fb.tenant_id,
             "workflow_type": fb.workflow_type,
             "carrier_name": fb.carrier_name,
             "bill_number": fb.bill_number,
@@ -495,6 +498,7 @@ async def review_queue(
     return [
         {
             "id": fb.id,
+            "tenant_id": fb.tenant_id,
             "workflow_type": fb.workflow_type,
             "carrier_name": fb.carrier_name,
             "bill_number": fb.bill_number,
