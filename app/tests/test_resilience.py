@@ -35,6 +35,14 @@ def test_confidence_scoring_stays_bounded_for_large_batches() -> None:
     assert len(set(scores)) >= 3
 
 
+def test_llm_json_extraction_handles_fenced_responses() -> None:
+    parsed = llm_service._extract_json_object(
+        '```json\n{"chosen_contract_id": "CC-1", "reasoning": "match"}\n```'
+    )
+
+    assert parsed["chosen_contract_id"] == "CC-1"
+
+
 @pytest.mark.asyncio
 async def test_llm_quota_error_opens_circuit_and_prevents_call_storm(monkeypatch) -> None:
     """

@@ -26,6 +26,18 @@ def _truncate(text: str, max_len: int = 1200) -> str:
     return text[:max_len] + "...<truncated>"
 
 
+def _extract_json_object(text: str) -> dict:
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.removeprefix("```json").removeprefix("```").strip()
+        cleaned = cleaned.removesuffix("```").strip()
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        raise ValueError("LLM response did not contain a JSON object")
+    return json.loads(cleaned[start:end + 1])
+
+
 def _get_llm_client():
     preferred = (settings.llm_provider or "").strip().lower()
 
@@ -251,8 +263,7 @@ async def resolve_ambiguous_contract(
 
     result = await _call_llm(prompt, max_tokens=200, operation="contract_ambiguity_resolution")
     try:
-        result = result.strip().lstrip("```json").rstrip("```").strip()
-        parsed = json.loads(result)
+        parsed = _extract_json_object(result)
         chosen_id = parsed.get("chosen_contract_id")
         reasoning = parsed.get("reasoning", "LLM resolved ambiguity")
         chosen = next((c for c in candidate_contracts if c["id"] == chosen_id), None)
