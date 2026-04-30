@@ -344,6 +344,18 @@ async def health_graph() -> dict:
     return {**result, "timestamp": datetime.utcnow().isoformat()}
 
 
+@router.get("/workflows")
+async def list_workflows() -> list[dict]:
+    return [
+        {
+            "name": workflow.name,
+            "description": workflow.description,
+            "agent": workflow.agent,
+        }
+        for workflow in SUPPORTED_WORKFLOWS.values()
+    ]
+
+
 @router.post("/admin/rebuild-graph", tags=["Admin"], summary="Rebuild in-memory graph")
 async def rebuild_graph(
     db: AsyncSession = Depends(get_db),
