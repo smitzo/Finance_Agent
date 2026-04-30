@@ -20,6 +20,7 @@ from app.config import get_settings
 from app.db.session import AsyncSessionLocal, get_db
 from app.models.db_models import AuditLog, FreightBillStatus
 from app.tenancy import tenant_from_header
+from app.workflows import FREIGHT_AUDIT, SUPPORTED_WORKFLOWS, is_supported_workflow
 from app.services.admin_data_service import clear_all_data
 from app.services.demo_data_service import clear_demo_data, load_demo_data
 from app.services.freight_service import (
@@ -47,7 +48,7 @@ class FreightBillIn(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     id: str | None = None
-    workflow_type: str = "freight_audit"
+    workflow_type: str = FREIGHT_AUDIT
     idempotency_key: str | None = None
     carrier_id: str | None = None
     carrier_name: str
@@ -216,6 +217,16 @@ async def _ingest_one_bill(
     bill_data = payload.model_dump()
     bill_data["id"] = bill_id
     bill_data["tenant_id"] = tenant_id
+    if not is_supported_workflow(bill_data["workflow_type"]):
+        return {
+            "id": bill_id,
+            "accepted": False,
+            "status": "unsupported_workflow",
+            "error": (
+                f"Unsupported workflow_type '{bill_data['workflow_type']}'. "
+                f"Supported workflows: {sorted(SUPPORTED_WORKFLOWS)}"
+            ),
+        }
 
     existing_idempotent_bill = await find_by_idempotency_key(
         db,

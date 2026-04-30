@@ -14,6 +14,8 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, relationship
 import enum
 
+from app.workflows import FREIGHT_AUDIT
+
 
 class Base(DeclarativeBase):
     pass
@@ -120,7 +122,7 @@ class FreightBill(Base):
 
     id = Column(String, primary_key=True)
     tenant_id = Column(String(64), nullable=False, default="default", server_default="default", index=True)
-    workflow_type = Column(String(50), nullable=False, default="freight_audit", server_default="freight_audit")
+    workflow_type = Column(String(50), nullable=False, default=FREIGHT_AUDIT, server_default=FREIGHT_AUDIT)
     idempotency_key = Column(String(100), nullable=True)
     carrier_id = Column(String, nullable=True)
     carrier_name = Column(String, nullable=False)
