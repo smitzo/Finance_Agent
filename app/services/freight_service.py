@@ -22,6 +22,7 @@ INGEST_ALLOWED_FIELDS = {
     "id",
     "tenant_id",
     "workflow_type",
+    "idempotency_key",
     "carrier_id",
     "carrier_name",
     "bill_number",
@@ -144,6 +145,25 @@ async def find_duplicate_bill(
                 return row
 
     return None
+
+
+async def find_by_idempotency_key(
+    db: AsyncSession,
+    tenant_id: str | None,
+    workflow_type: str,
+    idempotency_key: str | None,
+) -> FreightBill | None:
+    if not idempotency_key:
+        return None
+    tenant_id = normalize_tenant_id(tenant_id)
+    result = await db.execute(
+        select(FreightBill).where(
+            FreightBill.tenant_id == tenant_id,
+            FreightBill.workflow_type == workflow_type,
+            FreightBill.idempotency_key == idempotency_key,
+        )
+    )
+    return result.scalars().first()
 
 
 async def set_processing(db: AsyncSession, bill_id: str, thread_id: str, tenant_id: str | None = None) -> None:

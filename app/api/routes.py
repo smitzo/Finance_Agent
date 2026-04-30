@@ -25,6 +25,7 @@ from app.services.demo_data_service import clear_demo_data, load_demo_data
 from app.services.freight_service import (
     apply_reviewer_decision,
     create_bill,
+    find_by_idempotency_key,
     find_duplicate_bill,
     get_audit_entries,
     get_bill,
@@ -47,6 +48,7 @@ class FreightBillIn(BaseModel):
 
     id: str | None = None
     workflow_type: str = "freight_audit"
+    idempotency_key: str | None = None
     carrier_id: str | None = None
     carrier_name: str
     bill_number: str
@@ -73,6 +75,7 @@ class FreightBillOut(BaseModel):
     id: str
     tenant_id: str
     workflow_type: str
+    idempotency_key: str | None
     carrier_name: str
     bill_number: str
     bill_date: str
@@ -214,6 +217,20 @@ async def _ingest_one_bill(
     bill_data["id"] = bill_id
     bill_data["tenant_id"] = tenant_id
 
+    existing_idempotent_bill = await find_by_idempotency_key(
+        db,
+        tenant_id=tenant_id,
+        workflow_type=bill_data["workflow_type"],
+        idempotency_key=bill_data.get("idempotency_key"),
+    )
+    if existing_idempotent_bill:
+        return {
+            "id": existing_idempotent_bill.id,
+            "accepted": True,
+            "status": existing_idempotent_bill.status.value if existing_idempotent_bill.status else "unknown",
+            "message": "Idempotent request already accepted",
+        }
+
     duplicate = await find_duplicate_bill(
         db=db,
         tenant_id=tenant_id,
@@ -239,6 +256,7 @@ async def _ingest_one_bill(
     extra_keys = sorted(set(bill_data.keys()) - {
         "id",
         "workflow_type",
+        "idempotency_key",
         "carrier_id",
         "carrier_name",
         "bill_number",
@@ -456,6 +474,7 @@ async def get_freight_bill(
         id=fb.id,
         tenant_id=fb.tenant_id,
         workflow_type=fb.workflow_type,
+        idempotency_key=fb.idempotency_key,
         carrier_name=fb.carrier_name,
         bill_number=fb.bill_number,
         bill_date=fb.bill_date,
