@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -477,8 +477,10 @@ async def get_freight_bill(
 async def list_freight_bills(
     db: AsyncSession = Depends(get_db),
     tenant_id: str = Depends(tenant_from_header),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
 ) -> list[dict]:
-    bills = await list_bills(db, tenant_id)
+    bills = await list_bills(db, tenant_id, limit=limit, offset=offset)
     return [
         {
             "id": fb.id,
@@ -500,8 +502,10 @@ async def list_freight_bills(
 async def review_queue(
     db: AsyncSession = Depends(get_db),
     tenant_id: str = Depends(tenant_from_header),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
 ) -> list[dict]:
-    bills = await list_review_queue(db, tenant_id)
+    bills = await list_review_queue(db, tenant_id, limit=limit, offset=offset)
     return [
         {
             "id": fb.id,

@@ -57,22 +57,36 @@ async def get_bill(db: AsyncSession, bill_id: str, tenant_id: str | None = None)
     return result.scalars().first()
 
 
-async def list_bills(db: AsyncSession, tenant_id: str | None = None) -> list[FreightBill]:
+async def list_bills(
+    db: AsyncSession,
+    tenant_id: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[FreightBill]:
     tenant_id = normalize_tenant_id(tenant_id)
     result = await db.execute(
         select(FreightBill)
         .where(FreightBill.tenant_id == tenant_id)
         .order_by(FreightBill.created_at.desc())
+        .limit(limit)
+        .offset(offset)
     )
     return result.scalars().all()
 
 
-async def list_review_queue(db: AsyncSession, tenant_id: str | None = None) -> list[FreightBill]:
+async def list_review_queue(
+    db: AsyncSession,
+    tenant_id: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[FreightBill]:
     tenant_id = normalize_tenant_id(tenant_id)
     result = await db.execute(
         select(FreightBill)
         .where(FreightBill.tenant_id == tenant_id, FreightBill.status == FreightBillStatus.awaiting_review)
         .order_by(FreightBill.created_at.asc())
+        .limit(limit)
+        .offset(offset)
     )
     return result.scalars().all()
 
