@@ -17,6 +17,7 @@ cd finance_agent
 # 2. Add your LLM key
 cp .env.example .env
 # edit .env — set ANTHROPIC_API_KEY or OPENAI_API_KEY
+# Docker also starts Neo4j for graph traversal.
 
 # 3. Start everything
 docker-compose up --build
@@ -45,9 +46,11 @@ cp .env.example .env
 # then edit .env and set one LLM key:
 #   ANTHROPIC_API_KEY=...
 #   or OPENAI_API_KEY=...
-# Optional resilience toggles:
+# Optional resilience and scale toggles:
 #   LLM_CIRCUIT_BREAKER_COOLDOWN_SECONDS=60
 #   MAX_CONCURRENT_AGENT_RUNS=8
+#   BULK_INGEST_BATCH_SIZE=250
+#   GRAPH_BACKEND=memory  # local fallback if Neo4j is not running
 
 # Load seed data
 python -m app.seed_loader
@@ -162,6 +165,7 @@ After deploy, open:
 | GET | `/metrics` | Agent performance summary |
 | GET | `/health` | Liveness check |
 | GET | `/health/db` | DB connectivity check (`SELECT 1`) |
+| GET | `/health/graph` | Graph backend health check |
 | POST | `/admin/demo/load` | Load and process demo data |
 | DELETE | `/admin/demo` | Remove demo data |
 | DELETE | `/admin/data?confirm=DELETE_ALL` | Remove all application data |
@@ -171,8 +175,10 @@ After deploy, open:
 ```bash
 curl -X POST http://localhost:8000/freight-bills \
   -H "Content-Type: application/json" \
+  -H "X-Tenant-ID: default" \
   -d '{
     "id": "FB-2025-101",
+    "workflow_type": "freight_audit",
     "carrier_id": "CAR001",
     "carrier_name": "Safexpress Logistics",
     "bill_number": "SFX/2025/00234",
@@ -195,6 +201,7 @@ Use a JSON array (`[...]`), not comma-separated standalone objects:
 ```bash
 curl -X POST http://localhost:8000/freight-bills \
   -H "Content-Type: application/json" \
+  -H "X-Tenant-ID: default" \
   -d '[
     {
       "id": "FB-2025-101",
@@ -256,25 +263,24 @@ curl -X POST http://localhost:8000/review/FB-2025-102 \
 
 **Why `evidence` as JSONB on FreightBill?** The evidence chain is a structured blob that travels with the bill and is always read whole. No need to normalize it.
 
-### Graph (NetworkX, in-memory)
+### Graph (Neo4j production backend)
 
 ```
-Carrier ──has_contract──► Contract ──covers_lane──► Lane
+Carrier --HAS_CONTRACT--> Contract --COVERS_LANE--> Lane
    │                          │
-   └──has_shipment──► Shipment ──has_bol──► BOL
+   └--HAS_SHIPMENT--> Shipment --HAS_BOL--> BOL
                           ▲
-                    FreightBill ──references──►┘
+                    FreightBill --REFERENCES--┘
 ```
 
-**Why NetworkX instead of Neo4j?**  
-The seed data has ~30 nodes and ~50 edges. At this scale, an in-memory NetworkX graph is:
-- Zero infrastructure overhead (no extra container)
-- Rebuilt from Postgres at startup in <100ms
-- Sufficient for all traversal patterns we need (carrier→contracts→lanes, shipment→BOLs, FB→prior bills)
+Postgres remains the source of truth for workflow state. Neo4j is the production traversal store for carrier, contract, lane, shipment, BOL, and freight bill relationships.
 
-With Neo4j you'd add Cypher queries, a driver, connection pooling, and a container — real overhead for a problem that doesn't need it yet. The graph is rebuilt on startup so it stays consistent with Postgres.
+The app uses a `GraphService` abstraction with two backends:
 
-**When to switch to Neo4j:** If the graph grows to millions of nodes, or if you need complex multi-hop queries across carriers (e.g. "find all shipments with rate anomalies across carriers on overlapping lanes"), then Neo4j's native indexes and Cypher become worth it.
+- `Neo4jGraphBackend`: production backend, enabled with `GRAPH_BACKEND=neo4j`.
+- `MemoryGraphBackend`: local/test fallback when Neo4j credentials are not configured.
+
+Every graph node includes `tenant_id`, and graph lookups are tenant-scoped.
 
 ---
 
@@ -376,12 +382,12 @@ All charge math, date checks, weight validation, and rate comparisons are determ
 
 - **MemorySaver over PostgresSaver**: State is lost on restart. Fine for a 48h assignment, but in production you'd use `langgraph-checkpoint-postgres`. The swap is one line.
 - **Background tasks over Celery/RQ**: FastAPI's `BackgroundTasks` is simple and works for the demo. At volume you'd want a proper task queue so agent runs survive API pod restarts.
-- **NetworkX over Neo4j**: Right call for this data scale. See Graph section above.
+- **Neo4j over NetworkX**: Neo4j is now the production graph backend. The in-process memory backend remains only as a local/test fallback.
 - **All disputed/flagged bills go to human review**: A production system might auto-reject clear duplicates without human review. I chose conservative behaviour — ops teams prefer to see everything initially.
 
 **With more time:**
 - Replace `MemorySaver` with `AsyncPostgresSaver` for durable state
-- Add Alembic migrations instead of `create_all`
+- Expand Alembic migrations and remove startup `create_all` once deployments rely fully on migrations
 - Add a Celery worker for agent execution (decouple from API process)
 - More test coverage: integration tests with a real DB using `pytest-asyncio`
 - GCP deployment: Cloud Run (API) + Cloud SQL (Postgres) + Secret Manager
