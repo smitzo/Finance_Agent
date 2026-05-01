@@ -21,7 +21,73 @@ class Base(DeclarativeBase):
     pass
 
 
-# Reference data (loaded from seed) 
+class PartnerFirm(Base):
+    __tablename__ = "partner_firms"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_partner_firms_tenant_name"),
+        Index("ix_partner_firms_tenant_type", "tenant_id", "firm_type"),
+    )
+
+    id = Column(String, primary_key=True)
+    tenant_id = Column(String(64), nullable=False, default="default", server_default="default", index=True)
+    name = Column(String(200), nullable=False)
+    firm_type = Column(String(50), nullable=False, default="ca_firm", server_default="ca_firm")
+    registration_number = Column(String(80), nullable=True)
+    gstin = Column(String(20), nullable=True)
+    contact_name = Column(String(120), nullable=False)
+    contact_email = Column(String(200), nullable=False)
+    contact_phone = Column(String(40), nullable=True)
+    status = Column(String(20), nullable=False, default="active", server_default="active")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    companies = relationship("Company", back_populates="ca_partner_firm")
+
+
+class Company(Base):
+    __tablename__ = "companies"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "legal_name", name="uq_companies_tenant_legal_name"),
+        Index("ix_companies_tenant_status", "tenant_id", "status"),
+    )
+
+    id = Column(String, primary_key=True)
+    tenant_id = Column(String(64), nullable=False, default="default", server_default="default", index=True)
+    legal_name = Column(String(200), nullable=False)
+    display_name = Column(String(160), nullable=False)
+    gstin = Column(String(20), nullable=True)
+    country = Column(String(2), nullable=False, default="IN", server_default="IN")
+    timezone = Column(String(60), nullable=False, default="Asia/Kolkata", server_default="Asia/Kolkata")
+    billing_email = Column(String(200), nullable=False)
+    status = Column(String(20), nullable=False, default="active", server_default="active")
+    ca_partner_firm_id = Column(String, ForeignKey("partner_firms.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    ca_partner_firm = relationship("PartnerFirm", back_populates="companies")
+    users = relationship("AppUser", back_populates="company")
+
+
+class AppUser(Base):
+    __tablename__ = "app_users"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "username", name="uq_app_users_tenant_username"),
+        Index("ix_app_users_tenant_role", "tenant_id", "role"),
+    )
+
+    id = Column(String, primary_key=True)
+    tenant_id = Column(String(64), nullable=False, default="default", server_default="default", index=True)
+    company_id = Column(String, ForeignKey("companies.id"), nullable=True)
+    username = Column(String(80), nullable=False)
+    display_name = Column(String(120), nullable=False)
+    email = Column(String(200), nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    role = Column(String(30), nullable=False, default="operator", server_default="operator")
+    status = Column(String(20), nullable=False, default="active", server_default="active")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    company = relationship("Company", back_populates="users")
+
+
+# Reference data (loaded from seed)
 
 class Carrier(Base):
     __tablename__ = "carriers"
