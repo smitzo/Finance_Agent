@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     # Multi-tenancy
     default_tenant_id: str = "default"
 
+    # Authentication bootstrap user. Replace with DB-backed users before public deployment.
+    admin_username: str = "admin"
+    admin_password: str = "admin"
+
     # LLM — at least one key required for LLM features
     llm_provider: str = "anthropic"          # "openai" | "anthropic"
     llm_openai_model: str = "gpt-4o-mini"
