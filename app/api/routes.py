@@ -308,6 +308,13 @@ async def health_db(db: AsyncSession = Depends(get_db)) -> dict:
     return {"status": "ok", "database": "connected", "timestamp": datetime.utcnow().isoformat()}
 
 
+@router.get("/health/graph")
+async def health_graph() -> dict:
+    graph_service = get_graph_service()
+    result = await graph_service.health()
+    return {**result, "timestamp": datetime.utcnow().isoformat()}
+
+
 @router.post("/admin/rebuild-graph", tags=["Admin"], summary="Rebuild in-memory graph")
 async def rebuild_graph(
     db: AsyncSession = Depends(get_db),
