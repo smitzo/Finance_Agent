@@ -17,6 +17,23 @@ from app.models.db_models import FreightBill, FreightBillStatus, AuditLog
 
 logger = logging.getLogger(__name__)
 
+INGEST_ALLOWED_FIELDS = {
+    "id",
+    "carrier_id",
+    "carrier_name",
+    "bill_number",
+    "bill_date",
+    "shipment_reference",
+    "lane",
+    "billed_weight_kg",
+    "rate_per_kg",
+    "billing_unit",
+    "base_charge",
+    "fuel_surcharge",
+    "gst_amount",
+    "total_amount",
+}
+
 
 def _map_decision_to_status(decision: str | None) -> FreightBillStatus:
     value = (decision or "").strip().lower()
@@ -50,10 +67,48 @@ async def list_review_queue(db: AsyncSession) -> list[FreightBill]:
 
 
 async def create_bill(db: AsyncSession, bill_data: dict) -> FreightBill:
-    fb = FreightBill(**bill_data)
+    known_data = {k: v for k, v in bill_data.items() if k in INGEST_ALLOWED_FIELDS}
+    extra_data = {k: v for k, v in bill_data.items() if k not in INGEST_ALLOWED_FIELDS}
+
+    fb = FreightBill(**known_data)
+    if extra_data:
+        fb.evidence = {"payload_extra_fields": extra_data}
+        logger.info("[%s] Preserved %d extra payload fields in evidence", known_data.get("id", "unknown"), len(extra_data))
     db.add(fb)
     await db.flush()
     return fb
+
+
+async def find_duplicate_bill(
+    db: AsyncSession,
+    bill_number: str,
+    carrier_id: str | None,
+    carrier_name: str | None,
+) -> FreightBill | None:
+    """
+    Best-effort duplicate detection before invoking the agent:
+    1) Prefer exact carrier_id + bill_number match.
+    2) Fallback to case-insensitive carrier_name + bill_number when carrier_id is missing.
+    """
+    if carrier_id:
+        result = await db.execute(
+            select(FreightBill).where(
+                FreightBill.bill_number == bill_number,
+                FreightBill.carrier_id == carrier_id,
+            )
+        )
+        duplicate = result.scalars().first()
+        if duplicate:
+            return duplicate
+
+    normalized_name = (carrier_name or "").strip().lower()
+    if normalized_name:
+        result = await db.execute(select(FreightBill).where(FreightBill.bill_number == bill_number))
+        for row in result.scalars().all():
+            if (row.carrier_name or "").strip().lower() == normalized_name:
+                return row
+
+    return None
 
 
 async def set_processing(db: AsyncSession, bill_id: str, thread_id: str) -> None:
@@ -85,7 +140,8 @@ async def persist_result(
     fb.confidence_score = confidence
     fb.decision = decision
     fb.decision_reason = explanation
-    fb.evidence = {
+    existing_evidence = fb.evidence or {}
+    result_evidence = {
         "findings": findings,
         "chosen_contract": state.get("chosen_contract"),
         "ambiguity_note": state.get("ambiguity_note"),
@@ -93,6 +149,7 @@ async def persist_result(
         "bols_count": len(state.get("bols", [])),
         "prior_billed_weight": state.get("prior_billed_weight", 0),
     }
+    fb.evidence = {**existing_evidence, **result_evidence}
 
     if interrupted:
         fb.status = FreightBillStatus.awaiting_review
