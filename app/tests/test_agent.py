@@ -8,7 +8,7 @@ import pytest
 from app.agent.rules import (
     ValidationResult, Finding,
     check_duplicate, check_carrier_known, check_contract_active,
-    check_rate, check_fuel_surcharge, check_base_charge,
+    check_rate, check_min_weight, check_fuel_surcharge, check_base_charge,
     check_weight_vs_bol, check_total_amount,
     compute_confidence,
 )
@@ -107,6 +107,32 @@ def test_rate_mismatch_error():
     assert f.severity == "error"
     assert f.code == "RATE_MISMATCH"
     assert f.detail["pct_diff"] == pytest.approx(8.75, rel=1e-2)
+
+
+# check_min_weight
+
+def test_min_weight_not_applicable():
+    bill = {"billed_weight_kg": 600}
+    rate_row = {"rate_per_kg": 10.50}
+    f = check_min_weight(bill, rate_row)
+    assert f.severity == "ok"
+    assert f.code == "MIN_WEIGHT_NOT_APPLICABLE"
+
+
+def test_min_weight_met():
+    bill = {"billed_weight_kg": 1200}
+    rate_row = {"rate_per_kg": 10.50, "min_weight_kg": 1000}
+    f = check_min_weight(bill, rate_row)
+    assert f.severity == "ok"
+    assert f.code == "MIN_WEIGHT_MET"
+
+
+def test_min_weight_not_met():
+    bill = {"billed_weight_kg": 600}
+    rate_row = {"rate_per_kg": 10.50, "min_weight_kg": 1000}
+    f = check_min_weight(bill, rate_row)
+    assert f.severity == "error"
+    assert f.code == "MIN_WEIGHT_NOT_MET"
 
 
 # check_fuel_surcharge 

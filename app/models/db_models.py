@@ -93,6 +93,9 @@ class FreightBillStatus(str, enum.Enum):
 
 class FreightBill(Base):
     __tablename__ = "freight_bills"
+    __table_args__ = (
+        UniqueConstraint("carrier_id", "bill_number", name="uq_freight_bills_carrier_bill_number"),
+    )
 
     id = Column(String, primary_key=True)
     carrier_id = Column(String, nullable=True)

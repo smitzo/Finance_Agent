@@ -87,6 +87,17 @@
         { "lane": "DEL-BLR", "description": "Delhi to Bangalore", "rate_per_kg": 15.80, "min_charge": 6200.00, "fuel_surcharge_percent": 9 }
       ]
     },
+
+    {
+    "id": "CC-2025-SFX-004",
+    "carrier_id": "CAR001",
+    "effective_date": "2025-01-01",
+    "expiry_date": "2025-12-31",
+    "rate_card": [
+      { "lane": "DEL-BOM", "rate_per_kg": 10.50, "min_weight_kg": 1000, "fuel_surcharge_percent": 8 }
+    ]
+  },
+
     {
       "id": "CC-2024-DEL-001",
       "carrier_id": "CAR002",
