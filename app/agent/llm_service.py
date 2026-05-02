@@ -12,10 +12,18 @@ All deterministic checks (rates, weights, dates) are in rules.py.
 from __future__ import annotations
 import json
 import logging
+import time
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+_llm_circuit_open_until_monotonic = 0.0
+
+
+def _truncate(text: str, max_len: int = 1200) -> str:
+    if len(text) <= max_len:
+        return text
+    return text[:max_len] + "...<truncated>"
 
 
 def _get_llm_client():
@@ -39,30 +47,138 @@ def _get_llm_client():
     return (None, None)
 
 
-async def _call_llm(prompt: str, max_tokens: int = 500) -> str:
+def _looks_like_quota_or_rate_limit_error(exc: Exception) -> bool:
+    text = f"{type(exc).__name__}: {exc}".lower()
+    hints = (
+        "insufficient_quota",
+        "quota",
+        "rate limit",
+        "ratelimit",
+        "429",
+        "too many requests",
+    )
+    return any(h in text for h in hints)
+
+
+def _open_llm_circuit(reason: str) -> None:
+    global _llm_circuit_open_until_monotonic
+    cooldown = max(1, int(settings.llm_circuit_breaker_cooldown_seconds))
+    _llm_circuit_open_until_monotonic = time.monotonic() + cooldown
+    logger.warning(
+        "LLM circuit opened cooldown_seconds=%d reason=%s",
+        cooldown,
+        reason,
+    )
+
+
+def _is_llm_circuit_open() -> bool:
+    return time.monotonic() < _llm_circuit_open_until_monotonic
+
+
+def _llm_circuit_seconds_remaining() -> int:
+    remaining = int(_llm_circuit_open_until_monotonic - time.monotonic())
+    return max(0, remaining)
+
+
+async def _call_llm(prompt: str, max_tokens: int = 500, operation: str = "generic") -> str:
+    if _is_llm_circuit_open():
+        logger.warning(
+            "LLM skipped operation=%s reason=circuit_open seconds_remaining=%d",
+            operation,
+            _llm_circuit_seconds_remaining(),
+        )
+        return ""
+
     provider, client = _get_llm_client()
     if client is None:
-        logger.warning("No LLM client available — returning empty string")
+        logger.warning(
+            "LLM skipped operation=%s reason=no_configured_provider_or_api_key",
+            operation,
+        )
         return ""
 
     try:
+        logger.info(
+            "LLM call start operation=%s provider=%s max_tokens=%d",
+            operation,
+            provider,
+            max_tokens,
+        )
+        if settings.llm_debug_payloads:
+            logger.info("LLM input operation=%s prompt=%s", operation, _truncate(prompt))
         if provider == "openai":
-            resp = await client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=max_tokens,
-                temperature=0,
-            )
-            return resp.choices[0].message.content.strip()
+            request_payload = {
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": max_tokens,
+                "temperature": 0,
+            }
+            if settings.llm_debug_payloads:
+                logger.info(
+                    "LLM OpenAI request operation=%s payload=%s",
+                    operation,
+                    _truncate(json.dumps(request_payload, ensure_ascii=False)),
+                )
+            resp = await client.chat.completions.create(**request_payload)
+            result = resp.choices[0].message.content.strip()
+            logger.info("LLM call success operation=%s provider=%s", operation, provider)
+            if settings.llm_debug_payloads:
+                usage_dump = None
+                try:
+                    usage_dump = resp.usage.model_dump() if resp.usage else None
+                except Exception:
+                    usage_dump = str(resp.usage)
+                response_payload = {
+                    "id": getattr(resp, "id", None),
+                    "model": getattr(resp, "model", None),
+                    "usage": usage_dump,
+                    "content": result,
+                }
+                logger.info(
+                    "LLM OpenAI response operation=%s payload=%s",
+                    operation,
+                    _truncate(json.dumps(response_payload, ensure_ascii=False)),
+                )
+            return result
         else:  # anthropic
+            request_payload = {
+                "model": "claude-haiku-4-5-20251001",
+                "max_tokens": max_tokens,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+            if settings.llm_debug_payloads:
+                logger.info(
+                    "LLM Anthropic request operation=%s payload=%s",
+                    operation,
+                    _truncate(json.dumps(request_payload, ensure_ascii=False)),
+                )
             resp = await client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=max_tokens,
-                messages=[{"role": "user", "content": prompt}],
+                **request_payload,
             )
-            return resp.content[0].text.strip()
+            result = resp.content[0].text.strip()
+            logger.info("LLM call success operation=%s provider=%s", operation, provider)
+            if settings.llm_debug_payloads:
+                usage_dump = None
+                try:
+                    usage_dump = resp.usage.model_dump() if resp.usage else None
+                except Exception:
+                    usage_dump = str(resp.usage)
+                response_payload = {
+                    "id": getattr(resp, "id", None),
+                    "model": getattr(resp, "model", None),
+                    "usage": usage_dump,
+                    "content": result,
+                }
+                logger.info(
+                    "LLM Anthropic response operation=%s payload=%s",
+                    operation,
+                    _truncate(json.dumps(response_payload, ensure_ascii=False)),
+                )
+            return result
     except Exception as e:
-        logger.error(f"LLM call failed: {e}")
+        if _looks_like_quota_or_rate_limit_error(e):
+            _open_llm_circuit(str(e))
+        logger.error("LLM call failed operation=%s provider=%s error=%s", operation, provider, e)
         return ""
 
 
@@ -86,7 +202,7 @@ async def normalize_carrier_name(incoming_name: str, known_carriers: list[dict])
         Reply with nothing else.
     """
 
-    result = await _call_llm(prompt, max_tokens=20)
+    result = await _call_llm(prompt, max_tokens=20, operation="carrier_name_normalization")
     result = result.strip().strip('"')
     if result and result != "NO_MATCH" and result.startswith("CAR"):
         return result
@@ -137,7 +253,7 @@ async def resolve_ambiguous_contract(
         {{"chosen_contract_id": "<id>", "reasoning": "<1-2 sentence explanation>"}}
     """
 
-    result = await _call_llm(prompt, max_tokens=200)
+    result = await _call_llm(prompt, max_tokens=200, operation="contract_ambiguity_resolution")
     try:
         result = result.strip().lstrip("```json").rstrip("```").strip()
         parsed = json.loads(result)
@@ -175,7 +291,7 @@ async def generate_explanation(
         Write a clear 2-3 sentence explanation suitable for a human reviewer. Be specific about what was checked and what the key issue is (if any). Do not use bullet points.
     """
 
-    result = await _call_llm(prompt, max_tokens=200)
+    result = await _call_llm(prompt, max_tokens=200, operation="decision_explanation")
     if not result:
         errors = [f for f in findings if f.get("severity") == "error"]
         if errors:

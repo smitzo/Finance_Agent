@@ -8,7 +8,6 @@ Returns structured findings that feed into the confidence score.
 from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Any
 
 
 TOLERANCE = 0.02  # 2% tolerance on monetary amounts
@@ -143,6 +142,33 @@ def check_rate(bill: dict, rate_row: dict, bill_date: str) -> Finding:
         severity=severity,
         message=f"Billed ₹{billed_rate}/kg vs contracted ₹{contracted_rate}/kg ({pct:+.1f}%)",
         detail={"billed": billed_rate, "contracted": contracted_rate, "pct_diff": round(pct, 2)},
+    )
+
+
+def check_min_weight(bill: dict, rate_row: dict) -> Finding:
+    """Validate rate-card minimum weight eligibility when provided."""
+    min_weight = rate_row.get("min_weight_kg")
+    if min_weight is None:
+        return Finding(
+            code="MIN_WEIGHT_NOT_APPLICABLE",
+            severity="ok",
+            message="No minimum weight constraint on selected rate row",
+        )
+
+    billed_weight = bill.get("billed_weight_kg", 0)
+    if billed_weight >= min_weight:
+        return Finding(
+            code="MIN_WEIGHT_MET",
+            severity="ok",
+            message=f"Billed weight {billed_weight}kg meets minimum weight {min_weight}kg",
+            detail={"billed_weight": billed_weight, "min_weight_kg": min_weight},
+        )
+
+    return Finding(
+        code="MIN_WEIGHT_NOT_MET",
+        severity="error",
+        message=f"Billed weight {billed_weight}kg is below minimum contract weight {min_weight}kg",
+        detail={"billed_weight": billed_weight, "min_weight_kg": min_weight},
     )
 
 
