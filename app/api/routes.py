@@ -12,14 +12,14 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.agent import get_agent
 from app.auth import AuthenticatedUser, require_admin, require_current_user
 from app.config import get_settings
 from app.db.session import AsyncSessionLocal, get_db
-from app.models.db_models import AuditLog, FreightBillStatus
+from app.models.db_models import AuditLog, Company, PartnerFirm, FreightBillStatus
 from app.tenancy import tenant_from_header
 from app.workflows import FREIGHT_AUDIT, SUPPORTED_WORKFLOWS, is_supported_workflow
 from app.services.admin_data_service import clear_all_data
@@ -92,6 +92,31 @@ class FreightBillOut(BaseModel):
     reviewer_notes: str | None
     reviewed_at: datetime | None
     created_at: datetime
+
+
+class PartnerFirmOut(BaseModel):
+    id: str
+    name: str
+    firm_type: str
+    registration_number: str | None
+    gstin: str | None
+    contact_name: str
+    contact_email: str
+    contact_phone: str | None
+    status: str
+
+
+class CompanyOut(BaseModel):
+    id: str
+    tenant_id: str
+    legal_name: str
+    display_name: str
+    gstin: str | None
+    country: str
+    timezone: str
+    billing_email: str
+    status: str
+    ca_partner_firm: PartnerFirmOut | None
 
 
 async def run_agent_for_bill(bill_id: str, bill_dict: dict) -> None:
@@ -355,6 +380,78 @@ async def list_workflows() -> list[dict]:
             "agent": workflow.agent,
         }
         for workflow in SUPPORTED_WORKFLOWS.values()
+    ]
+
+
+@router.get("/company", response_model=CompanyOut | None)
+async def get_company_profile(
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(tenant_from_header),
+    _: AuthenticatedUser = Depends(require_current_user),
+) -> CompanyOut | None:
+    result = await db.execute(
+        select(Company)
+        .where(Company.tenant_id == tenant_id, Company.status == "active")
+        .order_by(Company.created_at.asc())
+    )
+    company = result.scalars().first()
+    if not company:
+        return None
+
+    partner = None
+    if company.ca_partner_firm_id:
+        partner_row = await db.get(PartnerFirm, company.ca_partner_firm_id)
+        if partner_row and partner_row.tenant_id == tenant_id:
+            partner = PartnerFirmOut(
+                id=partner_row.id,
+                name=partner_row.name,
+                firm_type=partner_row.firm_type,
+                registration_number=partner_row.registration_number,
+                gstin=partner_row.gstin,
+                contact_name=partner_row.contact_name,
+                contact_email=partner_row.contact_email,
+                contact_phone=partner_row.contact_phone,
+                status=partner_row.status,
+            )
+
+    return CompanyOut(
+        id=company.id,
+        tenant_id=company.tenant_id,
+        legal_name=company.legal_name,
+        display_name=company.display_name,
+        gstin=company.gstin,
+        country=company.country,
+        timezone=company.timezone,
+        billing_email=company.billing_email,
+        status=company.status,
+        ca_partner_firm=partner,
+    )
+
+
+@router.get("/partner-firms", response_model=list[PartnerFirmOut])
+async def list_partner_firms(
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(tenant_from_header),
+    _: AuthenticatedUser = Depends(require_current_user),
+) -> list[PartnerFirmOut]:
+    result = await db.execute(
+        select(PartnerFirm)
+        .where(PartnerFirm.tenant_id == tenant_id)
+        .order_by(PartnerFirm.created_at.asc())
+    )
+    return [
+        PartnerFirmOut(
+            id=firm.id,
+            name=firm.name,
+            firm_type=firm.firm_type,
+            registration_number=firm.registration_number,
+            gstin=firm.gstin,
+            contact_name=firm.contact_name,
+            contact_email=firm.contact_email,
+            contact_phone=firm.contact_phone,
+            status=firm.status,
+        )
+        for firm in result.scalars().all()
     ]
 
 
