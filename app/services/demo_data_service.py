@@ -182,7 +182,7 @@ def build_demo_dataset(tenant_id: str | None = None) -> dict[str, list[dict]]:
         freight_bills.append({
             "tenant_id": tenant_id,
             "id": bill_id,
-            "carrier_id": None if anomaly_kind == "duplicate_number" else carrier_id,
+            "carrier_id": carrier_id,
             "carrier_name": carrier_name,
             "bill_number": f"DEMO/DET/{idx:03d}",
             "bill_date": "2025-06-05",
@@ -357,7 +357,7 @@ def build_demo_dataset(tenant_id: str | None = None) -> dict[str, list[dict]]:
         freight_bills.append({
             "tenant_id": tenant_id,
             "id": bill_id,
-            "carrier_id": carrier_id,
+            "carrier_id": None if anomaly_kind == "duplicate_number" else carrier_id,
             "carrier_name": carrier_name,
             "bill_number": "DEMO/ANOM/DUP" if anomaly_kind == "duplicate_number" else f"DEMO/ANOM/{offset:03d}",
             "bill_date": "2025-08-06",

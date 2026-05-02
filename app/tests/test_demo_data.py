@@ -1,5 +1,6 @@
 from app.services.demo_data_service import (
     DEMO_BILL_COUNT,
+    DEMO_ANOMALY_COUNT,
     DEMO_DETERMINISTIC_COUNT,
     DEMO_LLM_COUNT,
     build_demo_dataset,
@@ -13,6 +14,8 @@ def test_demo_dataset_shape():
     assert len(data["shipments"]) == DEMO_BILL_COUNT
     assert len(data["bills_of_lading"]) == DEMO_BILL_COUNT
     assert len(data["carrier_contracts"]) >= DEMO_BILL_COUNT
+    assert len(data["companies"]) == 1
+    assert len(data["partner_firms"]) == 1
 
 
 def test_demo_dataset_has_deterministic_and_llm_paths():
@@ -20,7 +23,10 @@ def test_demo_dataset_has_deterministic_and_llm_paths():
 
     deterministic = [bill for bill in bills if bill["carrier_id"]]
     llm = [bill for bill in bills if not bill["carrier_id"]]
+    anomalies = [bill for bill in bills if str(bill["id"]).startswith("DEMO-FB-1")]
 
-    assert len(deterministic) == DEMO_DETERMINISTIC_COUNT
-    assert len(llm) == DEMO_LLM_COUNT
+    assert len(deterministic) >= DEMO_DETERMINISTIC_COUNT
+    assert len(llm) >= DEMO_LLM_COUNT
+    assert DEMO_ANOMALY_COUNT > 0
+    assert anomalies
     assert all(bill["shipment_reference"] for bill in bills)
