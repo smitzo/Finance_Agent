@@ -15,16 +15,19 @@ from app.tenancy import normalize_tenant_id
 from app.models.db_models import (
     AuditLog,
     BillOfLading,
+    Company,
     Carrier,
     CarrierContract,
     FreightBill,
     FreightBillStatus,
+    PartnerFirm,
     Shipment,
 )
 
-DEMO_BILL_COUNT = 20
-DEMO_DETERMINISTIC_COUNT = 10
-DEMO_LLM_COUNT = 10
+DEMO_BILL_COUNT = 120
+DEMO_DETERMINISTIC_COUNT = 60
+DEMO_LLM_COUNT = 40
+DEMO_ANOMALY_COUNT = 20
 
 
 def _money(value: float) -> float:
@@ -42,6 +45,30 @@ def _bill_amounts(weight: float, rate: float, fsc_percent: float) -> tuple[float
 def build_demo_dataset(tenant_id: str | None = None) -> dict[str, list[dict]]:
     """Build 20 demo freight bills and their reference records."""
     tenant_id = normalize_tenant_id(tenant_id)
+    partner_firms = [{
+        "tenant_id": tenant_id,
+        "id": "DEMO-CA-FIRM-001",
+        "name": "Demo Ledger Assurance LLP",
+        "firm_type": "ca_firm",
+        "registration_number": "FRN-DEMO-001",
+        "gstin": "27DEMOCA001Z5",
+        "contact_name": "Asha Mehta",
+        "contact_email": "asha.mehta@demo-ledger.example",
+        "contact_phone": "+91-90000-00001",
+        "status": "active",
+    }]
+    companies = [{
+        "tenant_id": tenant_id,
+        "id": "DEMO-COMPANY-001",
+        "legal_name": "Demo Freight Operating Company Private Limited",
+        "display_name": "Demo FreightCo",
+        "gstin": "27DEMOFRT001Z2",
+        "country": "IN",
+        "timezone": "Asia/Kolkata",
+        "billing_email": "finance@demo-freightco.example",
+        "status": "active",
+        "ca_partner_firm_id": "DEMO-CA-FIRM-001",
+    }]
     carriers = [
         {
             "tenant_id": tenant_id,
@@ -90,7 +117,7 @@ def build_demo_dataset(tenant_id: str | None = None) -> dict[str, list[dict]]:
     bols: list[dict] = []
     freight_bills: list[dict] = []
 
-    deterministic_lanes = [
+    base_lanes = [
         ("DEL-JAI", 9.50, 500, "CAR-DEMO001"),
         ("BOM-SUR", 8.75, 640, "CAR-DEMO002"),
         ("BLR-MYS", 7.20, 720, "CAR-DEMO003"),
@@ -98,9 +125,14 @@ def build_demo_dataset(tenant_id: str | None = None) -> dict[str, list[dict]]:
         ("PUN-NAG", 9.80, 910, "CAR-DEMO001"),
         ("CHN-CBE", 7.90, 1000, "CAR-DEMO002"),
         ("KOL-BBS", 8.60, 1120, "CAR-DEMO003"),
-        ("AHM-RAJ", 6.90, 1250, "CAR-DEMO004"),
-        ("LKO-KNP", 5.80, 1390, "CAR-DEMO001"),
-        ("IND-BPL", 6.40, 1500, "CAR-DEMO002"),
+        ("AHM-UDA", 6.90, 1250, "CAR-DEMO004"),
+        ("LKO-VNS", 5.80, 1390, "CAR-DEMO001"),
+        ("IND-UJN", 6.40, 1500, "CAR-DEMO002"),
+    ]
+    deterministic_lanes = [
+        (lane, _money(rate + (idx % 5) * 0.15), weight + (idx % 7) * 35, carrier_id)
+        for idx in range(DEMO_DETERMINISTIC_COUNT)
+        for lane, rate, weight, carrier_id in [base_lanes[idx % len(base_lanes)]]
     ]
 
     for idx, (lane, rate, weight, carrier_id) in enumerate(deterministic_lanes, start=1):
@@ -150,7 +182,7 @@ def build_demo_dataset(tenant_id: str | None = None) -> dict[str, list[dict]]:
         freight_bills.append({
             "tenant_id": tenant_id,
             "id": bill_id,
-            "carrier_id": carrier_id,
+            "carrier_id": None if anomaly_kind == "duplicate_number" else carrier_id,
             "carrier_name": carrier_name,
             "bill_number": f"DEMO/DET/{idx:03d}",
             "bill_date": "2025-06-05",
@@ -166,7 +198,7 @@ def build_demo_dataset(tenant_id: str | None = None) -> dict[str, list[dict]]:
             "demo_kind": "deterministic",
         })
 
-    llm_lanes = [
+    base_llm_lanes = [
         ("DEL-AGR", 12.20, 1040, "CAR-DEMO001", "Atlas Freight Demo"),
         ("BOM-NAS", 11.40, 1180, "CAR-DEMO002", "Northline Demo Logistics"),
         ("BLR-HUB", 10.60, 1260, "CAR-DEMO003", "Meridian Demo Transport"),
@@ -177,6 +209,11 @@ def build_demo_dataset(tenant_id: str | None = None) -> dict[str, list[dict]]:
         ("AHM-UDA", 10.30, 1740, "CAR-DEMO004", "Skyline Cargo Demo"),
         ("LKO-VNS", 7.70, 1820, "CAR-DEMO001", "Demo Atlas Freight Co"),
         ("IND-UJN", 8.40, 1900, "CAR-DEMO002", "Demo Northline Freight"),
+    ]
+    llm_lanes = [
+        (lane, _money(rate + (idx % 4) * 0.2), weight + (idx % 6) * 40, carrier_id, fuzzy_name)
+        for idx in range(DEMO_LLM_COUNT)
+        for lane, rate, weight, carrier_id, fuzzy_name in [base_llm_lanes[idx % len(base_llm_lanes)]]
     ]
 
     for offset, (lane, premium_rate, weight, carrier_id, fuzzy_name) in enumerate(llm_lanes, start=1):
@@ -263,7 +300,82 @@ def build_demo_dataset(tenant_id: str | None = None) -> dict[str, list[dict]]:
             "demo_kind": "llm",
         })
 
+    anomaly_lanes = [
+        ("DEL-JAI", 9.50, 720, "CAR-DEMO001", "rate_outlier"),
+        ("BOM-SUR", 8.75, 900, "CAR-DEMO002", "weight_overbill"),
+        ("BLR-MYS", 7.20, 840, "CAR-DEMO003", "duplicate_number"),
+        ("HYD-VIJ", 8.10, 950, "CAR-DEMO004", "total_mismatch"),
+    ]
+    for offset in range(1, DEMO_ANOMALY_COUNT + 1):
+        lane, rate, weight, carrier_id, anomaly_kind = anomaly_lanes[(offset - 1) % len(anomaly_lanes)]
+        idx = DEMO_DETERMINISTIC_COUNT + DEMO_LLM_COUNT + offset
+        contract_id = f"DEMO-CC-ANOM-{offset:03d}"
+        shipment_id = f"DEMO-SHP-{idx:03d}"
+        bol_id = f"DEMO-BOL-{idx:03d}"
+        bill_id = f"DEMO-FB-{idx:03d}"
+        carrier_name = next(c["name"] for c in carriers if c["id"] == carrier_id)
+        billed_rate = rate * 1.45 if anomaly_kind == "rate_outlier" else rate
+        bol_weight = weight - 260 if anomaly_kind == "weight_overbill" else weight
+        base, fsc, gst, total = _bill_amounts(weight, billed_rate, 9)
+        if anomaly_kind == "total_mismatch":
+            total = _money(total + 777)
+        contracts.append({
+            "tenant_id": tenant_id,
+            "id": contract_id,
+            "carrier_id": carrier_id,
+            "effective_date": "2025-01-01",
+            "expiry_date": "2025-12-31",
+            "status": "active",
+            "notes": f"Demo anomaly contract for {anomaly_kind}",
+            "rate_card": [{
+                "lane": lane,
+                "description": f"Demo anomaly lane {lane}",
+                "rate_per_kg": rate,
+                "min_charge": 1000.00,
+                "fuel_surcharge_percent": 9,
+            }],
+        })
+        shipments.append({
+            "tenant_id": tenant_id,
+            "id": shipment_id,
+            "carrier_id": carrier_id,
+            "contract_id": contract_id,
+            "lane": lane,
+            "shipment_date": "2025-08-01",
+            "status": "delivered",
+            "total_weight_kg": bol_weight,
+            "notes": f"Demo anomaly shipment: {anomaly_kind}",
+        })
+        bols.append({
+            "tenant_id": tenant_id,
+            "id": bol_id,
+            "shipment_id": shipment_id,
+            "delivery_date": "2025-08-04",
+            "actual_weight_kg": bol_weight,
+            "notes": f"Demo anomaly BOL: {anomaly_kind}",
+        })
+        freight_bills.append({
+            "tenant_id": tenant_id,
+            "id": bill_id,
+            "carrier_id": carrier_id,
+            "carrier_name": carrier_name,
+            "bill_number": "DEMO/ANOM/DUP" if anomaly_kind == "duplicate_number" else f"DEMO/ANOM/{offset:03d}",
+            "bill_date": "2025-08-06",
+            "shipment_reference": shipment_id,
+            "lane": lane,
+            "billed_weight_kg": weight,
+            "rate_per_kg": billed_rate,
+            "billing_unit": "kg",
+            "base_charge": base,
+            "fuel_surcharge": fsc,
+            "gst_amount": gst,
+            "total_amount": total,
+            "demo_kind": anomaly_kind,
+        })
+
     return {
+        "partner_firms": partner_firms,
+        "companies": companies,
         "carriers": carriers,
         "carrier_contracts": contracts,
         "shipments": shipments,
@@ -310,6 +422,16 @@ async def clear_demo_data(db: AsyncSession, tenant_id: str | None = None) -> dic
         .where(Carrier.tenant_id == tenant_id, Carrier.id.like("CAR-DEMO%"))
         .execution_options(synchronize_session=False)
     )
+    company_result = await db.execute(
+        delete(Company)
+        .where(Company.tenant_id == tenant_id, Company.id.like("DEMO-COMPANY-%"))
+        .execution_options(synchronize_session=False)
+    )
+    partner_result = await db.execute(
+        delete(PartnerFirm)
+        .where(PartnerFirm.tenant_id == tenant_id, PartnerFirm.id.like("DEMO-CA-FIRM-%"))
+        .execution_options(synchronize_session=False)
+    )
 
     await db.commit()
     return {
@@ -319,6 +441,8 @@ async def clear_demo_data(db: AsyncSession, tenant_id: str | None = None) -> dic
         "shipments": shipment_result.rowcount or 0,
         "carrier_contracts": contract_result.rowcount or 0,
         "carriers": carrier_result.rowcount or 0,
+        "companies": company_result.rowcount or 0,
+        "partner_firms": partner_result.rowcount or 0,
     }
 
 
@@ -327,6 +451,14 @@ async def load_demo_data(db: AsyncSession, tenant_id: str | None = None) -> dict
     tenant_id = normalize_tenant_id(tenant_id)
     removed = await clear_demo_data(db, tenant_id)
     data = build_demo_dataset(tenant_id)
+
+    for row in data["partner_firms"]:
+        db.add(PartnerFirm(**row))
+    await db.flush()
+
+    for row in data["companies"]:
+        db.add(Company(**row))
+    await db.flush()
 
     for row in data["carriers"]:
         db.add(Carrier(**row))
@@ -365,12 +497,15 @@ async def load_demo_data(db: AsyncSession, tenant_id: str | None = None) -> dict
         "removed": removed,
         "loaded": {
             "carriers": len(data["carriers"]),
+            "companies": len(data["companies"]),
+            "partner_firms": len(data["partner_firms"]),
             "carrier_contracts": len(data["carrier_contracts"]),
             "shipments": len(data["shipments"]),
             "bills_of_lading": len(data["bills_of_lading"]),
             "freight_bills": len(bill_payloads),
             "deterministic_bills": DEMO_DETERMINISTIC_COUNT,
             "llm_bills": DEMO_LLM_COUNT,
+            "anomaly_bills": DEMO_ANOMALY_COUNT,
         },
         "bill_payloads": bill_payloads,
     }
