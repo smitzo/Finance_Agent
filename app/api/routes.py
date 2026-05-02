@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,21 +49,21 @@ class FreightBillIn(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     id: str | None = None
-    workflow_type: str = FREIGHT_AUDIT
-    idempotency_key: str | None = None
+    workflow_type: str = Field(default=FREIGHT_AUDIT, min_length=1, max_length=50)
+    idempotency_key: str | None = Field(default=None, max_length=100)
     carrier_id: str | None = None
-    carrier_name: str
-    bill_number: str
-    bill_date: str
+    carrier_name: str = Field(min_length=1, max_length=200)
+    bill_number: str = Field(min_length=1, max_length=100)
+    bill_date: str = Field(min_length=10, max_length=20)
     shipment_reference: str | None = None
-    lane: str
-    billed_weight_kg: float
-    rate_per_kg: float | None = None
-    billing_unit: str = "kg"
-    base_charge: float
-    fuel_surcharge: float
-    gst_amount: float
-    total_amount: float
+    lane: str = Field(min_length=3, max_length=30)
+    billed_weight_kg: float = Field(gt=0)
+    rate_per_kg: float | None = Field(default=None, gt=0)
+    billing_unit: str = Field(default="kg", min_length=1, max_length=20)
+    base_charge: float = Field(ge=0)
+    fuel_surcharge: float = Field(ge=0)
+    gst_amount: float = Field(ge=0)
+    total_amount: float = Field(gt=0)
 
 
 class ReviewDecisionIn(BaseModel):
