@@ -121,6 +121,7 @@ async def run_agent_for_bill(bill_id: str, bill_dict: dict) -> None:
             "bols": [],
             "prior_billed_weight": 0.0,
             "existing_bill_ids": [],
+            "graph_anomalies": [],
             "findings": [],
             "ambiguity_note": None,
             "confidence": 0.0,

@@ -205,6 +205,7 @@ async def persist_result(
         "shipment": state.get("shipment"),
         "bols_count": len(state.get("bols", [])),
         "prior_billed_weight": state.get("prior_billed_weight", 0),
+        "graph_anomalies": state.get("graph_anomalies", []),
     }
     fb.evidence = {**existing_evidence, **result_evidence}
 

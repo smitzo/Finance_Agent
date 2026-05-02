@@ -64,6 +64,7 @@ class AgentState(TypedDict):
     bols: list[dict]
     prior_billed_weight: float
     existing_bill_ids: list[str]
+    graph_anomalies: list[dict]
 
     # validation
     findings: Annotated[list[dict], operator.add]   # accumulate across nodes
@@ -168,6 +169,7 @@ async def load_context(state: AgentState) -> dict:
         carrier_name=bill.get("carrier_name"),
         exclude_bill_id=bill_id,
     )
+    graph_anomalies = await graph.detect_anomalies_for_bill(tenant_id, bill_id)
 
     audit.append({
         "event": "context_loaded",
@@ -177,6 +179,7 @@ async def load_context(state: AgentState) -> dict:
         "bols": len(bols),
         "prior_billed_weight": prior_billed_weight,
         "duplicates_found": dup_ids,
+        "graph_anomalies": len(graph_anomalies),
         "ts": _now(),
     })
     logger.info(
@@ -198,6 +201,7 @@ async def load_context(state: AgentState) -> dict:
         "bols": bols,
         "prior_billed_weight": prior_billed_weight,
         "existing_bill_ids": dup_ids,
+        "graph_anomalies": graph_anomalies,
         "findings": [],
         "ambiguity_note": None,
         "audit": audit,
@@ -231,6 +235,9 @@ async def validate(state: AgentState) -> dict:
 
     # 3. Internal total consistency (base + fsc + gst = total)
     findings.append(_finding_to_dict(rules.check_total_amount(bill)))
+
+    # 5. Graph-native anomaly findings from traversal/Cypher layer
+    findings.extend(state.get("graph_anomalies", []))
 
     # 4. Weight vs BOL (always deterministic — not contract-dependent)
     findings.append(_finding_to_dict(rules.check_weight_vs_bol(
