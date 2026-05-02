@@ -57,3 +57,62 @@ async def test_memory_graph_duplicate_lookup_is_tenant_scoped() -> None:
 
     assert tenant_a_dupes == ["FB-1"]
     assert tenant_b_dupes == ["FB-2"]
+
+
+@pytest.mark.asyncio
+async def test_memory_graph_detects_bill_anomalies() -> None:
+    graph = MemoryGraphBackend()
+    tenant_id = "tenant_a"
+    graph._add_node(tenant_id, "carrier:CAR-1", {
+        "id": "CAR-1",
+        "type": "carrier",
+        "tenant_id": tenant_id,
+        "name": "Carrier One",
+    })
+    graph._add_node(tenant_id, "contract:CC-1", {
+        "id": "CC-1",
+        "type": "contract",
+        "tenant_id": tenant_id,
+        "carrier_id": "CAR-1",
+    })
+    graph._add_node(tenant_id, "lane:DEL-BLR", {"type": "lane", "tenant_id": tenant_id, "lane": "DEL-BLR"})
+    graph._add_edge(tenant_id, "carrier:CAR-1", "contract:CC-1", {"rel": "has_contract"})
+    graph._add_edge(
+        tenant_id,
+        "contract:CC-1",
+        "lane:DEL-BLR",
+        {"rel": "covers_lane", "rate_row": {"lane": "DEL-BLR", "rate_per_kg": 10.0}},
+    )
+    graph._add_node(tenant_id, "shipment:SHP-1", {"id": "SHP-1", "type": "shipment", "tenant_id": tenant_id})
+    graph._add_node(tenant_id, "bol:BOL-1", {
+        "id": "BOL-1",
+        "type": "bol",
+        "tenant_id": tenant_id,
+        "actual_weight_kg": 100,
+    })
+    graph._add_edge(tenant_id, "shipment:SHP-1", "bol:BOL-1", {"rel": "has_bol"})
+    await graph.add_freight_bill(tenant_id, "FB-1", {
+        "id": "FB-1",
+        "bill_number": "INV-100",
+        "carrier_id": "CAR-1",
+        "carrier_name": "Carrier One",
+        "shipment_reference": "SHP-1",
+        "lane": "DEL-BLR",
+        "billed_weight_kg": 140,
+        "rate_per_kg": 15.0,
+    })
+    await graph.add_freight_bill(tenant_id, "FB-2", {
+        "id": "FB-2",
+        "bill_number": "INV-100",
+        "carrier_id": "CAR-1",
+        "carrier_name": "Carrier One",
+        "shipment_reference": "SHP-1",
+        "lane": "DEL-BLR",
+        "billed_weight_kg": 90,
+        "rate_per_kg": 10.0,
+    })
+
+    anomalies = await graph.detect_anomalies_for_bill(tenant_id, "FB-1")
+    codes = {anomaly["code"] for anomaly in anomalies}
+
+    assert {"GRAPH_DUPLICATE_BILL", "GRAPH_WEIGHT_OVER_BOL", "GRAPH_RATE_OUTLIER"} <= codes
