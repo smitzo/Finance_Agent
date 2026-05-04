@@ -11,6 +11,7 @@ contracts -> lanes -> shipments -> BOLs -> freight bills.
 from __future__ import annotations
 
 import logging
+import json
 from collections import defaultdict
 from typing import Protocol
 
@@ -36,6 +37,7 @@ class GraphBackend(Protocol):
     async def get_freight_bill_node(self, tenant_id: str, fb_id: str) -> dict | None: ...
     async def get_freight_bills_for_shipment(self, tenant_id: str, shipment_id: str) -> list[str]: ...
     async def health(self) -> dict: ...
+    async def detect_anomalies_for_bill(self, tenant_id: str, bill_id: str) -> list[dict]: ...
     async def find_duplicate_bill_ids(
         self,
         tenant_id: str,
@@ -152,7 +154,13 @@ class MemoryGraphBackend:
                 "carrier_name": fb.carrier_name,
                 "bill_number": fb.bill_number,
                 "shipment_reference": fb.shipment_reference,
+                "lane": fb.lane,
                 "billed_weight_kg": fb.billed_weight_kg,
+                "rate_per_kg": fb.rate_per_kg,
+                "base_charge": fb.base_charge,
+                "fuel_surcharge": fb.fuel_surcharge,
+                "gst_amount": fb.gst_amount,
+                "total_amount": fb.total_amount,
             })
 
     async def add_freight_bill(self, tenant_id: str, fb_id: str, fb_data: dict) -> None:
@@ -243,6 +251,69 @@ class MemoryGraphBackend:
     async def health(self) -> dict:
         return {"backend": "memory", "status": "ok", "tenants_loaded": len(self._nodes)}
 
+    async def detect_anomalies_for_bill(self, tenant_id: str, bill_id: str) -> list[dict]:
+        tenant_id = normalize_tenant_id(tenant_id)
+        fb = self._nodes[tenant_id].get(f"fb:{bill_id}")
+        if not fb:
+            return []
+
+        anomalies: list[dict] = []
+        duplicates = await self.find_duplicate_bill_ids(
+            tenant_id,
+            bill_number=fb.get("bill_number", ""),
+            carrier_id=fb.get("carrier_id"),
+            carrier_name=fb.get("carrier_name"),
+            exclude_bill_id=bill_id,
+        )
+        if duplicates:
+            anomalies.append({
+                "code": "GRAPH_DUPLICATE_BILL",
+                "severity": "error",
+                "message": "Graph traversal found duplicate bill numbers for the same carrier",
+                "detail": {"duplicate_bill_ids": duplicates},
+            })
+
+        shipment_ref = fb.get("shipment_reference")
+        if not shipment_ref:
+            anomalies.append({
+                "code": "GRAPH_MISSING_SHIPMENT_REFERENCE",
+                "severity": "warn",
+                "message": "Bill has no shipment reference, reducing graph explainability",
+                "detail": {},
+            })
+            return anomalies
+
+        bols = await self.get_bols_for_shipment(tenant_id, shipment_ref)
+        bol_weight = sum(float(b.get("actual_weight_kg") or 0) for b in bols)
+        billed_weight = float(fb.get("billed_weight_kg") or 0)
+        if bol_weight and billed_weight > bol_weight * 1.05:
+            anomalies.append({
+                "code": "GRAPH_WEIGHT_OVER_BOL",
+                "severity": "error",
+                "message": "Graph traversal found billed weight above connected BOL weight",
+                "detail": {"billed_weight_kg": billed_weight, "bol_weight_kg": bol_weight},
+            })
+
+        carrier_id = fb.get("carrier_id")
+        lane = fb.get("lane")
+        if carrier_id and lane:
+            contracts = await self.get_contracts_for_lane(tenant_id, carrier_id, lane)
+            contracted_rates = [
+                float((c.get("matched_rate_row") or {}).get("rate_per_kg"))
+                for c in contracts
+                if (c.get("matched_rate_row") or {}).get("rate_per_kg") is not None
+            ]
+            billed_rate = float(fb.get("rate_per_kg") or 0)
+            if contracted_rates and billed_rate > min(contracted_rates) * 1.20:
+                anomalies.append({
+                    "code": "GRAPH_RATE_OUTLIER",
+                    "severity": "error",
+                    "message": "Graph traversal found a billed rate more than 20% above contract rate",
+                    "detail": {"billed_rate": billed_rate, "contracted_rate": min(contracted_rates)},
+                })
+
+        return anomalies
+
 
 class Neo4jGraphBackend:
     """Neo4j-backed graph traversal store for production workloads."""
@@ -269,6 +340,10 @@ class Neo4jGraphBackend:
         async with self._driver.session(database=self._database) as session:
             result = await session.run(query, **params)
             return await result.data()
+
+    @staticmethod
+    def _contract_props(row: dict) -> dict:
+        return {**row, "rate_card_json": json.dumps(row.pop("rate_card", []))}
 
     async def _ensure_schema(self) -> None:
         if self._schema_ready:
@@ -350,7 +425,10 @@ class Neo4jGraphBackend:
                             "contract_id": cc.id,
                             "lane_id": lane,
                             "lane": lane,
-                            "rate_row": rate_row,
+                            "rate_row_json": json.dumps(rate_row),
+                            "rate_per_kg": rate_row.get("rate_per_kg"),
+                            "fuel_surcharge_percent": rate_row.get("fuel_surcharge_percent"),
+                            "min_weight_kg": rate_row.get("min_weight_kg"),
                         })
 
             await session.run(
@@ -362,7 +440,7 @@ class Neo4jGraphBackend:
                 MATCH (c:Carrier {tenant_id: row.tenant_id, id: row.carrier_id})
                 MERGE (c)-[:HAS_CONTRACT]->(cc)
                 """,
-                rows=contract_rows,
+                rows=[self._contract_props(dict(row)) for row in contract_rows],
             )
             await session.run(
                 """
@@ -372,7 +450,10 @@ class Neo4jGraphBackend:
                 WITH l, row
                 MATCH (cc:Contract {tenant_id: row.tenant_id, id: row.contract_id})
                 MERGE (cc)-[r:COVERS_LANE]->(l)
-                SET r.rate_row = row.rate_row
+                SET r.rate_row_json = row.rate_row_json,
+                    r.rate_per_kg = row.rate_per_kg,
+                    r.fuel_surcharge_percent = row.fuel_surcharge_percent,
+                    r.min_weight_kg = row.min_weight_kg
                 """,
                 rows=lane_rows,
             )
@@ -431,7 +512,13 @@ class Neo4jGraphBackend:
                     "carrier_name": fb.carrier_name,
                     "bill_number": fb.bill_number,
                     "shipment_reference": fb.shipment_reference,
+                    "lane": fb.lane,
                     "billed_weight_kg": fb.billed_weight_kg,
+                    "rate_per_kg": fb.rate_per_kg,
+                    "base_charge": fb.base_charge,
+                    "fuel_surcharge": fb.fuel_surcharge,
+                    "gst_amount": fb.gst_amount,
+                    "total_amount": fb.total_amount,
                 })
 
     async def add_freight_bill(self, tenant_id: str, fb_id: str, fb_data: dict) -> None:
@@ -472,7 +559,7 @@ class Neo4jGraphBackend:
         rows = await self._execute(
             """
             MATCH (:Carrier {tenant_id: $tenant_id, id: $carrier_id})-[:HAS_CONTRACT]->(cc:Contract)-[r:COVERS_LANE]->(:Lane {tenant_id: $tenant_id, lane: $lane})
-            RETURN properties(cc) AS contract, r.rate_row AS rate_row
+            RETURN properties(cc) AS contract, r.rate_row_json AS rate_row_json
             """,
             tenant_id=normalize_tenant_id(tenant_id),
             carrier_id=carrier_id,
@@ -481,7 +568,8 @@ class Neo4jGraphBackend:
         results = []
         for row in rows:
             contract = dict(row["contract"])
-            contract["matched_rate_row"] = row["rate_row"]
+            contract["rate_card"] = json.loads(contract.pop("rate_card_json", "[]"))
+            contract["matched_rate_row"] = json.loads(row["rate_row_json"] or "{}")
             results.append(contract)
         return results
 
@@ -522,6 +610,84 @@ class Neo4jGraphBackend:
             shipment_id=shipment_id,
         )
         return [row["id"] for row in rows]
+
+    async def detect_anomalies_for_bill(self, tenant_id: str, bill_id: str) -> list[dict]:
+        tenant_id = normalize_tenant_id(tenant_id)
+        rows = await self._execute(
+            """
+            MATCH (fb:FreightBill {tenant_id: $tenant_id, id: $bill_id})
+            CALL {
+              WITH fb
+              MATCH (other:FreightBill {tenant_id: fb.tenant_id, bill_number: fb.bill_number})
+              WHERE other.id <> fb.id
+                AND (
+                  (fb.carrier_id IS NOT NULL AND other.carrier_id = fb.carrier_id)
+                  OR (fb.carrier_id IS NULL AND toLower(trim(other.carrier_name)) = toLower(trim(fb.carrier_name)))
+                )
+              RETURN collect(other.id) AS duplicate_ids
+            }
+            CALL {
+              WITH fb
+              OPTIONAL MATCH (fb)-[:REFERENCES]->(:Shipment)-[:HAS_BOL]->(bol:BOL)
+              RETURN sum(coalesce(bol.actual_weight_kg, 0)) AS bol_weight
+            }
+            CALL {
+              WITH fb
+              OPTIONAL MATCH (:Carrier {tenant_id: fb.tenant_id, id: fb.carrier_id})-[:HAS_CONTRACT]->(:Contract)-[r:COVERS_LANE]->(:Lane {tenant_id: fb.tenant_id, lane: fb.lane})
+              RETURN min(r.rate_per_kg) AS contracted_rate
+            }
+            RETURN properties(fb) AS bill,
+                   duplicate_ids,
+                   bol_weight,
+                   contracted_rate
+            """,
+            tenant_id=tenant_id,
+            bill_id=bill_id,
+        )
+        if not rows:
+            return []
+
+        row = rows[0]
+        bill = row["bill"]
+        anomalies: list[dict] = []
+        duplicate_ids = row.get("duplicate_ids") or []
+        if duplicate_ids:
+            anomalies.append({
+                "code": "GRAPH_DUPLICATE_BILL",
+                "severity": "error",
+                "message": "Cypher found duplicate bill numbers for the same carrier",
+                "detail": {"duplicate_bill_ids": duplicate_ids},
+            })
+
+        bol_weight = float(row.get("bol_weight") or 0)
+        billed_weight = float(bill.get("billed_weight_kg") or 0)
+        if bol_weight and billed_weight > bol_weight * 1.05:
+            anomalies.append({
+                "code": "GRAPH_WEIGHT_OVER_BOL",
+                "severity": "error",
+                "message": "Cypher found billed weight above connected BOL weight",
+                "detail": {"billed_weight_kg": billed_weight, "bol_weight_kg": bol_weight},
+            })
+
+        contracted_rate = row.get("contracted_rate")
+        billed_rate = float(bill.get("rate_per_kg") or 0)
+        if contracted_rate is not None and billed_rate > float(contracted_rate) * 1.20:
+            anomalies.append({
+                "code": "GRAPH_RATE_OUTLIER",
+                "severity": "error",
+                "message": "Cypher found a billed rate more than 20% above contract rate",
+                "detail": {"billed_rate": billed_rate, "contracted_rate": float(contracted_rate)},
+            })
+
+        if not bill.get("shipment_reference"):
+            anomalies.append({
+                "code": "GRAPH_MISSING_SHIPMENT_REFERENCE",
+                "severity": "warn",
+                "message": "Bill has no shipment reference, reducing graph explainability",
+                "detail": {},
+            })
+
+        return anomalies
 
     async def find_duplicate_bill_ids(
         self,
@@ -620,6 +786,9 @@ class GraphService:
 
     async def health(self) -> dict:
         return await self.backend.health()
+
+    async def detect_anomalies_for_bill(self, tenant_id: str, bill_id: str) -> list[dict]:
+        return await self.backend.detect_anomalies_for_bill(normalize_tenant_id(tenant_id), bill_id)
 
 
 _graph_service: GraphService | None = None
