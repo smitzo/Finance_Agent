@@ -83,6 +83,12 @@ This creates room for additional invoice workflows later, for example:
 The current LangGraph path still implements freight audit behavior, but the
 data model and API are no longer locked to only one invoice type.
 
+Clients can discover supported workflow types with:
+
+```http
+GET /workflows
+```
+
 ## 5. Why Neo4j Replaces NetworkX
 
 The earlier prototype used NetworkX in memory. That is fine for a small
@@ -267,6 +273,10 @@ This gives two controls:
 2. max concurrent runs controls live workload pressure
 
 This is safer for large imports because it avoids uncontrolled task fan-out.
+
+Each invoice can include an `idempotency_key`. This lets clients safely retry a
+request after a timeout without creating a duplicate workflow run. The key is
+unique within `(tenant_id, workflow_type)`.
 
 ## 12. Database Migrations
 

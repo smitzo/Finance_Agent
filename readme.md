@@ -163,6 +163,7 @@ After deploy, open:
 | GET | `/review-queue` | Bills waiting for human review |
 | POST | `/review/{id}` | Submit reviewer decision, resume agent |
 | GET | `/metrics` | Agent performance summary |
+| GET | `/workflows` | List supported invoice workflows |
 | GET | `/health` | Liveness check |
 | GET | `/health/db` | DB connectivity check (`SELECT 1`) |
 | GET | `/health/graph` | Graph backend health check |
@@ -179,6 +180,7 @@ curl -X POST http://localhost:8000/freight-bills \
   -d '{
     "id": "FB-2025-101",
     "workflow_type": "freight_audit",
+    "idempotency_key": "client-request-2025-101",
     "carrier_id": "CAR001",
     "carrier_name": "Safexpress Logistics",
     "bill_number": "SFX/2025/00234",
@@ -197,6 +199,9 @@ curl -X POST http://localhost:8000/freight-bills \
 ### Example: Bulk ingest (array payload)
 
 Use a JSON array (`[...]`), not comma-separated standalone objects:
+
+For production clients, include `idempotency_key` per item so retries do not
+create duplicate workflow runs.
 
 ```bash
 curl -X POST http://localhost:8000/freight-bills \
