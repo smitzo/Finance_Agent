@@ -16,6 +16,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.agent import get_agent
+from app.auth import AuthenticatedUser, require_admin, require_current_user
 from app.config import get_settings
 from app.db.session import AsyncSessionLocal, get_db
 from app.models.db_models import AuditLog, FreightBillStatus
@@ -360,6 +361,7 @@ async def list_workflows() -> list[dict]:
 async def rebuild_graph(
     db: AsyncSession = Depends(get_db),
     tenant_id: str = Depends(tenant_from_header),
+    _: AuthenticatedUser = Depends(require_admin),
 ) -> dict:
     graph_service = get_graph_service()
     await graph_service.build(db, tenant_id)
@@ -371,6 +373,7 @@ async def load_and_process_demo_data(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     tenant_id: str = Depends(tenant_from_header),
+    _: AuthenticatedUser = Depends(require_admin),
 ) -> dict:
     result = await load_demo_data(db, tenant_id)
 
@@ -397,6 +400,7 @@ async def load_and_process_demo_data(
 async def remove_demo_data(
     db: AsyncSession = Depends(get_db),
     tenant_id: str = Depends(tenant_from_header),
+    _: AuthenticatedUser = Depends(require_admin),
 ) -> dict:
     removed = await clear_demo_data(db, tenant_id)
     graph_service = get_graph_service()
@@ -413,6 +417,7 @@ async def remove_all_data(
     confirm: str | None = None,
     db: AsyncSession = Depends(get_db),
     tenant_id: str = Depends(tenant_from_header),
+    _: AuthenticatedUser = Depends(require_admin),
 ) -> dict:
     if confirm != "DELETE_ALL":
         raise HTTPException(
@@ -436,6 +441,7 @@ async def ingest_freight_bill(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     tenant_id: str = Depends(tenant_from_header),
+    _: AuthenticatedUser = Depends(require_current_user),
 ) -> dict:
     # Backward-compatible single ingest
     if isinstance(payload, FreightBillIn):
@@ -489,6 +495,7 @@ async def get_freight_bill(
     bill_id: str,
     db: AsyncSession = Depends(get_db),
     tenant_id: str = Depends(tenant_from_header),
+    _: AuthenticatedUser = Depends(require_current_user),
 ) -> FreightBillOut:
     fb = await get_bill(db, bill_id, tenant_id)
     if not fb:
@@ -521,6 +528,7 @@ async def list_freight_bills(
     tenant_id: str = Depends(tenant_from_header),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
+    _: AuthenticatedUser = Depends(require_current_user),
 ) -> list[dict]:
     bills = await list_bills(db, tenant_id, limit=limit, offset=offset)
     return [
@@ -546,6 +554,7 @@ async def review_queue(
     tenant_id: str = Depends(tenant_from_header),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
+    _: AuthenticatedUser = Depends(require_current_user),
 ) -> list[dict]:
     bills = await list_review_queue(db, tenant_id, limit=limit, offset=offset)
     return [
@@ -574,6 +583,7 @@ async def submit_review(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     tenant_id: str = Depends(tenant_from_header),
+    _: AuthenticatedUser = Depends(require_current_user),
 ) -> dict:
     fb = await get_bill(db, bill_id, tenant_id)
     if not fb:
@@ -610,6 +620,7 @@ async def get_audit_log(
     bill_id: str,
     db: AsyncSession = Depends(get_db),
     tenant_id: str = Depends(tenant_from_header),
+    _: AuthenticatedUser = Depends(require_current_user),
 ) -> list[dict]:
     entries = await get_audit_entries(db, bill_id, tenant_id)
     return [{"event": e.event, "detail": e.detail, "created_at": e.created_at} for e in entries]
@@ -619,5 +630,6 @@ async def get_audit_log(
 async def metrics(
     db: AsyncSession = Depends(get_db),
     tenant_id: str = Depends(tenant_from_header),
+    _: AuthenticatedUser = Depends(require_current_user),
 ) -> dict:
     return await get_metrics(db, tenant_id)
