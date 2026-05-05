@@ -1,5 +1,24 @@
-async function fetchJson(url) {
-  const response = await fetch(url);
+const AUTH_HEADER = `Basic ${btoa("admin:admin")}`;
+
+function tenantId() {
+  return document.getElementById("tenant-id")?.value?.trim() || "default";
+}
+
+function requestHeaders() {
+  return {
+    Authorization: AUTH_HEADER,
+    "X-Tenant-ID": tenantId(),
+  };
+}
+
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      ...requestHeaders(),
+      ...(options.headers || {}),
+    },
+  });
   if (!response.ok) {
     throw new Error(`Request failed: ${response.status}`);
   }
@@ -121,5 +140,28 @@ async function loadMetricsPage() {
   }
 }
 
+async function loadDemoData() {
+  const status = document.getElementById("page-status");
+  status.textContent = "Loading demo data...";
+  await fetchJson("/admin/demo/load", { method: "POST" });
+  await loadMetricsPage();
+}
+
+async function deleteDemoData() {
+  const status = document.getElementById("page-status");
+  status.textContent = "Deleting demo data...";
+  await fetchJson("/admin/demo", { method: "DELETE" });
+  await loadMetricsPage();
+}
+
+const tenantInput = document.getElementById("tenant-id");
+tenantInput.value = localStorage.getItem("dashboardTenantId") || "default";
+tenantInput.addEventListener("change", () => {
+  localStorage.setItem("dashboardTenantId", tenantId());
+  loadMetricsPage();
+});
+
 document.getElementById("refresh-metrics").addEventListener("click", loadMetricsPage);
+document.getElementById("load-demo-data").addEventListener("click", loadDemoData);
+document.getElementById("delete-demo-data").addEventListener("click", deleteDemoData);
 loadMetricsPage();

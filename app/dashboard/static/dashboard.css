@@ -208,12 +208,24 @@ body {
 }
 
 button,
-.button-link {
+.button-link,
+.control-input {
   border: 0;
   border-radius: 999px;
   padding: 10px 14px;
-  cursor: pointer;
   font: inherit;
+}
+
+button,
+.button-link {
+  cursor: pointer;
+}
+
+.control-input {
+  min-width: 160px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.8);
+  color: var(--ink);
 }
 
 button.primary {
