@@ -15,3 +15,6 @@ alembic/versions/*.py
 !alembic/versions/.gitkeep
 logs/
 *.log
+node_modules/
+frontend/dist/
+frontend/.vite/
