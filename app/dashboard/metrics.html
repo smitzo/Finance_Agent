@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Freight Dashboard · Metrics</title>
+    <link rel="stylesheet" href="/dashboard/static/dashboard.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <h1>Freight Ops Dashboard</h1>
+          <p>Live view of bill flow, current stages, and recent outcomes.</p>
+        </div>
+        <nav class="nav" aria-label="Dashboard navigation">
+          <a class="active" href="/dashboard/metrics">Metrics</a>
+          <a href="/dashboard/reviews">Pending Review</a>
+        </nav>
+      </header>
+
+      <section class="hero">
+        <div class="hero-panel">
+          <h2>Processing Summary</h2>
+          <p id="page-status">Loading current metrics...</p>
+          <div class="actions" style="margin-top: 14px;">
+            <button id="refresh-metrics" class="primary">Refresh Metrics</button>
+            <a class="button-link secondary" style="text-decoration:none;" href="/docs">Swagger UI</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="cards">
+        <article class="card">
+          <div class="eyebrow">Total Bills</div>
+          <div id="total-bills" class="stat">--</div>
+        </article>
+        <article class="card">
+          <div class="eyebrow">Awaiting Review</div>
+          <div id="awaiting-review" class="stat">--</div>
+        </article>
+        <article class="card">
+          <div class="eyebrow">Pending + Processing</div>
+          <div id="processing" class="stat">--</div>
+        </article>
+        <article class="card">
+          <div class="eyebrow">Average Confidence</div>
+          <div id="avg-confidence" class="stat">--</div>
+        </article>
+      </section>
+
+      <section class="grid" style="margin-top: 20px;">
+        <section class="panel span-7">
+          <h2>Recent Freight Bills</h2>
+          <p class="status-copy">Most recent bills and their current workflow stage.</p>
+          <table style="margin-top: 14px;">
+            <thead>
+              <tr>
+                <th>Bill</th>
+                <th>Carrier</th>
+                <th>Lane</th>
+                <th>Confidence</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="recent-bills"></tbody>
+          </table>
+        </section>
+
+        <section class="panel span-5">
+          <h2>Decision Breakdown</h2>
+          <p class="status-copy">Final outcomes already recorded on bills.</p>
+          <div id="decision-breakdown" class="queue" style="margin-top: 14px;"></div>
+        </section>
+
+        <section class="panel span-12">
+          <h2>Stage Breakdown</h2>
+          <p class="status-copy">How many freight bills are currently in each stage.</p>
+          <div id="status-breakdown" class="queue" style="margin-top: 14px;"></div>
+        </section>
+      </section>
+    </main>
+    <script src="/dashboard/static/metrics.js"></script>
+  </body>
+</html>
