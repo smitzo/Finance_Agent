@@ -1,4 +1,13 @@
+import { useAuth } from "./context/AuthContext";
+import { AuthScreen } from "./features/auth/AuthScreen";
+
 export function App() {
+  const { session } = useAuth();
+
+  if (!session) {
+    return <AuthScreen />;
+  }
+
   return (
     <main className="min-h-screen bg-slate-50 text-slate-950 transition-colors dark:bg-zinc-950 dark:text-zinc-50">
       <div className="mx-auto flex min-h-screen max-w-7xl items-center justify-center px-6">
