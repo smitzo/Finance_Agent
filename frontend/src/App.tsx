@@ -4,6 +4,7 @@ import { AuthScreen } from "./features/auth/AuthScreen";
 import { AppLayout } from "./layout/AppLayout";
 import { CompanyPage } from "./pages/CompanyPage";
 import { OverviewPage } from "./pages/OverviewPage";
+import { PartnerPage } from "./pages/PartnerPage";
 
 type Page = "overview" | "company" | "partner";
 
@@ -20,7 +21,7 @@ export function App() {
       <>
         {page === "overview" ? <OverviewPage /> : null}
         {page === "company" ? <CompanyPage /> : null}
-        {page === "partner" ? "Partner workspace loading." : null}
+        {page === "partner" ? <PartnerPage /> : null}
       </>
     </AppLayout>
   );
