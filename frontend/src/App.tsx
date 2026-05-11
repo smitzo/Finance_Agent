@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useAuth } from "./context/AuthContext";
 import { AuthScreen } from "./features/auth/AuthScreen";
 import { AppLayout } from "./layout/AppLayout";
+import { CompanyPage } from "./pages/CompanyPage";
 import { OverviewPage } from "./pages/OverviewPage";
 
 type Page = "overview" | "company" | "partner";
@@ -18,7 +19,7 @@ export function App() {
     <AppLayout activePage={page} onNavigate={(nextPage) => setPage(nextPage as Page)}>
       <>
         {page === "overview" ? <OverviewPage /> : null}
-        {page === "company" ? "Company workspace loading." : null}
+        {page === "company" ? <CompanyPage /> : null}
         {page === "partner" ? "Partner workspace loading." : null}
       </>
     </AppLayout>
