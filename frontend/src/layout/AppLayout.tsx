@@ -2,6 +2,7 @@ import { BarChart3, Building2, LogOut, Moon, ShieldCheck, Sun, Truck } from "luc
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import { Button } from "../components/ui/Button";
+import { ToastViewport } from "../components/common/ToastViewport";
 
 type AppLayoutProps = {
   activePage: string;
@@ -77,6 +78,7 @@ export function AppLayout({ activePage, onNavigate, children }: AppLayoutProps) 
           <div className="p-6">{children}</div>
         </section>
       </div>
+      <ToastViewport />
     </main>
   );
 }
