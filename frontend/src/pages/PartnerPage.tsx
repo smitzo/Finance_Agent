@@ -5,6 +5,7 @@ import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
 import { Badge } from "../components/ui/Badge";
 import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
 import { api } from "../lib/api";
 import type { PartnerDraft, PartnerFirm } from "../types";
 
@@ -19,6 +20,7 @@ const emptyDraft: PartnerDraft = {
 
 export function PartnerPage() {
   const { session } = useAuth();
+  const { showToast } = useToast();
   const [partners, setPartners] = useState<PartnerFirm[]>([]);
   const [draft, setDraft] = useState<PartnerDraft>(() => {
     const stored = localStorage.getItem("partner-draft");
@@ -38,6 +40,7 @@ export function PartnerPage() {
   function saveDraft() {
     localStorage.setItem("partner-draft", JSON.stringify(draft));
     setMessage("Partner draft saved locally.");
+    showToast("Partner draft saved.", "success");
   }
 
   return (
