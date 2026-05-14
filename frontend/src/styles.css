@@ -25,3 +25,15 @@
     font: inherit;
   }
 }
+
+@keyframes drive {
+  0% {
+    transform: translate(-10%, -50%);
+  }
+  50% {
+    transform: translate(calc(100vw / 3), -50%);
+  }
+  100% {
+    transform: translate(-10%, -50%);
+  }
+}
