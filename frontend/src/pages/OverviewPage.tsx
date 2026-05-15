@@ -2,6 +2,7 @@ import { AlertTriangle, CheckCircle2, DatabaseZap, FileText } from "lucide-react
 import { useEffect, useState } from "react";
 import { TruckLoader } from "../components/common/TruckLoader";
 import { BillTable } from "../components/dashboard/BillTable";
+import { AnomalyRadar } from "../components/dashboard/AnomalyRadar";
 import { BreakdownList } from "../components/dashboard/BreakdownList";
 import { OnboardingProgress } from "../components/dashboard/OnboardingProgress";
 import { StatCard } from "../components/dashboard/StatCard";
@@ -93,6 +94,7 @@ export function OverviewPage() {
               { label: "Agent decisions present", complete: Boolean(Object.keys(metrics?.by_decision ?? {}).length) },
             ]}
           />
+          <AnomalyRadar bills={bills} />
           <BreakdownList title="Status breakdown" subtitle="Current workflow stages." values={metrics?.by_status ?? {}} />
           <BreakdownList title="Decision breakdown" subtitle="Final agent outcomes." values={metrics?.by_decision ?? {}} />
         </div>
