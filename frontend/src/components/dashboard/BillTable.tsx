@@ -1,4 +1,5 @@
 import type { FreightBill } from "../../types";
+import { formatCurrency, formatPercent } from "../../lib/format";
 import { Badge } from "../ui/Badge";
 import { Card, CardBody, CardHeader } from "../ui/Card";
 
@@ -23,6 +24,7 @@ export function BillTable({ bills }: { bills: FreightBill[] }) {
               <th className="px-5 py-3">Bill</th>
               <th className="px-5 py-3">Carrier</th>
               <th className="px-5 py-3">Lane</th>
+              <th className="px-5 py-3">Amount</th>
               <th className="px-5 py-3">Confidence</th>
               <th className="px-5 py-3">Status</th>
             </tr>
@@ -36,9 +38,8 @@ export function BillTable({ bills }: { bills: FreightBill[] }) {
                 </td>
                 <td className="px-5 py-4">{bill.carrier_name}</td>
                 <td className="px-5 py-4">{bill.lane}</td>
-                <td className="px-5 py-4">
-                  {bill.confidence_score == null ? "--" : `${Math.round(bill.confidence_score * 100)}%`}
-                </td>
+                <td className="px-5 py-4">{formatCurrency(bill.total_amount)}</td>
+                <td className="px-5 py-4">{formatPercent(bill.confidence_score)}</td>
                 <td className="px-5 py-4">
                   <Badge tone={statusTone(bill.status)}>{bill.status.replaceAll("_", " ")}</Badge>
                 </td>
@@ -46,7 +47,7 @@ export function BillTable({ bills }: { bills: FreightBill[] }) {
             ))}
             {!bills.length ? (
               <tr>
-                <td className="px-5 py-8 text-center text-slate-500 dark:text-zinc-400" colSpan={5}>
+                <td className="px-5 py-8 text-center text-slate-500 dark:text-zinc-400" colSpan={6}>
                   No freight bills yet. Load demo data to see the system breathe.
                 </td>
               </tr>
