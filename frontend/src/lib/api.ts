@@ -1,6 +1,6 @@
 import type { CompanyProfile, FreightBill, Metrics, PartnerFirm, UserSession } from "../types";
 
-const API_BASE = "/api";
+const API_BASE = import.meta.env.VITE_API_BASE || "/api";
 
 type RequestOptions = RequestInit & {
   session: UserSession;
