@@ -10,6 +10,7 @@ import { Button } from "../components/ui/Button";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { api } from "../lib/api";
+import { formatPercent } from "../lib/format";
 import type { FreightBill, Metrics } from "../types";
 
 export function OverviewPage() {
@@ -80,7 +81,7 @@ export function OverviewPage() {
         <StatCard label="Total bills" value={metrics?.total_bills ?? 0} detail="Across this tenant" icon={<FileText className="h-5 w-5" />} />
         <StatCard label="Awaiting review" value={byStatus.awaiting_review ?? 0} detail="Needs human decision" icon={<AlertTriangle className="h-5 w-5" />} />
         <StatCard label="Approved" value={byStatus.approved ?? 0} detail="Cleared workflow" icon={<CheckCircle2 className="h-5 w-5" />} />
-        <StatCard label="Avg confidence" value={metrics?.avg_confidence_score == null ? "--" : `${Math.round(metrics.avg_confidence_score * 100)}%`} detail="Agent score" icon={<DatabaseZap className="h-5 w-5" />} />
+        <StatCard label="Avg confidence" value={formatPercent(metrics?.avg_confidence_score)} detail="Agent score" icon={<DatabaseZap className="h-5 w-5" />} />
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[1fr_360px]">
