@@ -68,6 +68,17 @@ uvicorn app.main:app --reload --port 8000
 python -m pytest app/tests/ -v
 ```
 
+### React Dashboard
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173`. The Vite dev server proxies `/api` to `http://localhost:8000`.
+Use the bootstrap credentials `admin` / `admin` while database-backed users are being implemented.
+
 ### Resilience Tests (bulk + quota protection)
 
 ```bash
