@@ -1,9 +1,9 @@
-import type { InputHTMLAttributes, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
+import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
 
 type FieldShellProps = {
   label: string;
   hint?: string;
-  children: React.ReactNode;
+  children: ReactNode;
 };
 
 export function FieldShell({ label, hint, children }: FieldShellProps) {
