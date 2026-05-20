@@ -4,6 +4,7 @@ import { Card, CardBody, CardHeader } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Input, Select } from "../components/ui/Input";
 import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
 import { api } from "../lib/api";
 import type { CompanyDraft, CompanyProfile } from "../types";
 
@@ -17,6 +18,7 @@ const emptyDraft: CompanyDraft = {
 
 export function CompanyPage() {
   const { session } = useAuth();
+  const { showToast } = useToast();
   const [profile, setProfile] = useState<CompanyProfile | null>(null);
   const [draft, setDraft] = useState<CompanyDraft>(() => {
     const stored = localStorage.getItem("company-draft");
@@ -36,6 +38,7 @@ export function CompanyPage() {
   function saveDraft() {
     localStorage.setItem("company-draft", JSON.stringify(draft));
     setMessage("Company draft saved locally.");
+    showToast("Company draft saved.", "success");
   }
 
   return (
