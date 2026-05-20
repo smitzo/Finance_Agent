@@ -6,11 +6,13 @@ import { BreakdownList } from "../components/dashboard/BreakdownList";
 import { StatCard } from "../components/dashboard/StatCard";
 import { Button } from "../components/ui/Button";
 import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
 import { api } from "../lib/api";
 import type { FreightBill, Metrics } from "../types";
 
 export function OverviewPage() {
   const { session } = useAuth();
+  const { showToast } = useToast();
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [bills, setBills] = useState<FreightBill[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,6 +34,7 @@ export function OverviewPage() {
     setStatus("Loading rich demo data...");
     await api.loadDemo(session);
     await refresh();
+    showToast("Demo data loaded for this tenant.", "success");
   }
 
   async function deleteDemo() {
@@ -39,11 +42,13 @@ export function OverviewPage() {
     setStatus("Removing demo data...");
     await api.deleteDemo(session);
     await refresh();
+    showToast("Demo data removed for this tenant.", "success");
   }
 
   useEffect(() => {
     refresh().catch((error) => {
       setStatus(error instanceof Error ? error.message : "Could not load dashboard");
+      showToast("Could not load dashboard data.", "error");
       setLoading(false);
     });
   }, [session?.tenantId]);
