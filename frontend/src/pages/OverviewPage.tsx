@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { TruckLoader } from "../components/common/TruckLoader";
 import { BillTable } from "../components/dashboard/BillTable";
 import { BreakdownList } from "../components/dashboard/BreakdownList";
+import { OnboardingProgress } from "../components/dashboard/OnboardingProgress";
 import { StatCard } from "../components/dashboard/StatCard";
 import { Button } from "../components/ui/Button";
 import { useAuth } from "../context/AuthContext";
@@ -84,6 +85,14 @@ export function OverviewPage() {
       <section className="grid gap-6 xl:grid-cols-[1fr_360px]">
         <BillTable bills={bills} />
         <div className="grid gap-6">
+          <OnboardingProgress
+            steps={[
+              { label: "Signed in", complete: Boolean(session) },
+              { label: "Tenant selected", complete: Boolean(session?.tenantId) },
+              { label: "Bills available", complete: Boolean(metrics?.total_bills) },
+              { label: "Agent decisions present", complete: Boolean(Object.keys(metrics?.by_decision ?? {}).length) },
+            ]}
+          />
           <BreakdownList title="Status breakdown" subtitle="Current workflow stages." values={metrics?.by_status ?? {}} />
           <BreakdownList title="Decision breakdown" subtitle="Final agent outcomes." values={metrics?.by_decision ?? {}} />
         </div>
