@@ -1,5 +1,6 @@
-import { Building2, Save } from "lucide-react";
+import { Save } from "lucide-react";
 import { useEffect, useState } from "react";
+import { PageTitle } from "../components/common/PageTitle";
 import { Card, CardBody, CardHeader } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Input, Select } from "../components/ui/Input";
@@ -45,13 +46,7 @@ export function CompanyPage() {
     <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
       <Card>
         <CardHeader>
-          <div className="flex items-center gap-3">
-            <Building2 className="h-5 w-5 text-teal-600 dark:text-teal-300" />
-            <div>
-              <h1 className="font-semibold">Company setup</h1>
-              <p className="mt-1 text-sm text-slate-500 dark:text-zinc-400">{message}</p>
-            </div>
-          </div>
+          <PageTitle eyebrow="Company" title="Company setup" description={message} />
         </CardHeader>
         <CardBody className="grid gap-4">
           <div className="grid gap-4 md:grid-cols-2">
