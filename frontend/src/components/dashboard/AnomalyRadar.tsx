@@ -1,5 +1,6 @@
 import { Radar } from "lucide-react";
 import type { FreightBill } from "../../types";
+import { formatPercent } from "../../lib/format";
 import { Card, CardBody, CardHeader } from "../ui/Card";
 
 export function AnomalyRadar({ bills }: { bills: FreightBill[] }) {
@@ -24,7 +25,7 @@ export function AnomalyRadar({ bills }: { bills: FreightBill[] }) {
             <div className="flex items-center justify-between gap-3">
               <p className="font-medium">{bill.bill_number}</p>
               <p className="text-sm text-rose-600 dark:text-rose-300">
-                {bill.confidence_score == null ? "Needs review" : `${Math.round(bill.confidence_score * 100)}%`}
+                {formatPercent(bill.confidence_score)}
               </p>
             </div>
             <p className="mt-1 text-sm text-slate-500 dark:text-zinc-400">{bill.carrier_name} · {bill.lane}</p>
