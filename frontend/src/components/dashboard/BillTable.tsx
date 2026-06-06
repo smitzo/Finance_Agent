@@ -1,3 +1,5 @@
+import { FileSearch } from "lucide-react";
+import { EmptyState } from "../common/EmptyState";
 import type { FreightBill } from "../../types";
 import { formatCurrency, formatPercent } from "../../lib/format";
 import { Badge } from "../ui/Badge";
@@ -47,8 +49,12 @@ export function BillTable({ bills }: { bills: FreightBill[] }) {
             ))}
             {!bills.length ? (
               <tr>
-                <td className="px-5 py-8 text-center text-slate-500 dark:text-zinc-400" colSpan={6}>
-                  No freight bills yet. Load demo data to see the system breathe.
+                <td className="p-5" colSpan={6}>
+                  <EmptyState
+                    icon={<FileSearch className="h-5 w-5" />}
+                    title="No freight bills yet"
+                    description="Load demo data to see the validation workflow and graph anomaly radar."
+                  />
                 </td>
               </tr>
             ) : null}
