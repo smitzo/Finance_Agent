@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 import type { UserSession } from "../types";
 
 type AuthContextValue = {
@@ -21,7 +21,7 @@ function storedSession(): UserSession | null {
   }
 }
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<UserSession | null>(storedSession);
 
   const value = useMemo<AuthContextValue>(

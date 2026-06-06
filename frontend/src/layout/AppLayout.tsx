@@ -1,4 +1,5 @@
 import { BarChart3, Building2, LogOut, Moon, ShieldCheck, Sun, Truck } from "lucide-react";
+import type { ReactNode } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import { Button } from "../components/ui/Button";
@@ -7,7 +8,7 @@ import { ToastViewport } from "../components/common/ToastViewport";
 type AppLayoutProps = {
   activePage: string;
   onNavigate: (page: string) => void;
-  children: React.ReactNode;
+  children: ReactNode;
 };
 
 const navItems = [

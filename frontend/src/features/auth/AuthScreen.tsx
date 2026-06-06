@@ -1,5 +1,5 @@
 import { KeyRound, Sparkles, UserPlus } from "lucide-react";
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { Button } from "../../components/ui/Button";
 import { Card, CardBody } from "../../components/ui/Card";
@@ -13,7 +13,7 @@ export function AuthScreen() {
   const [password, setPassword] = useState("admin");
   const [tenantId, setTenantId] = useState("default");
 
-  function submit(event: React.FormEvent) {
+  function submit(event: FormEvent) {
     event.preventDefault();
     login({ username, password, tenantId });
   }
