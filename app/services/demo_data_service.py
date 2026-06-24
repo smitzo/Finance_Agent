@@ -11,6 +11,7 @@ from __future__ import annotations
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.tenancy import normalize_tenant_id
 from app.models.db_models import (
     AuditLog,
     BillOfLading,
@@ -38,10 +39,12 @@ def _bill_amounts(weight: float, rate: float, fsc_percent: float) -> tuple[float
     return base, fsc, gst, total
 
 
-def build_demo_dataset() -> dict[str, list[dict]]:
+def build_demo_dataset(tenant_id: str | None = None) -> dict[str, list[dict]]:
     """Build 20 demo freight bills and their reference records."""
+    tenant_id = normalize_tenant_id(tenant_id)
     carriers = [
         {
+            "tenant_id": tenant_id,
             "id": "CAR-DEMO001",
             "name": "Demo Atlas Freight",
             "carrier_code": "DAT",
@@ -51,6 +54,7 @@ def build_demo_dataset() -> dict[str, list[dict]]:
             "onboarded_on": "2024-01-01",
         },
         {
+            "tenant_id": tenant_id,
             "id": "CAR-DEMO002",
             "name": "Demo Northline Logistics",
             "carrier_code": "DNL",
@@ -60,6 +64,7 @@ def build_demo_dataset() -> dict[str, list[dict]]:
             "onboarded_on": "2024-02-01",
         },
         {
+            "tenant_id": tenant_id,
             "id": "CAR-DEMO003",
             "name": "Demo Meridian Transport",
             "carrier_code": "DMT",
@@ -69,6 +74,7 @@ def build_demo_dataset() -> dict[str, list[dict]]:
             "onboarded_on": "2024-03-01",
         },
         {
+            "tenant_id": tenant_id,
             "id": "CAR-DEMO004",
             "name": "Demo Skyline Cargo",
             "carrier_code": "DSC",
@@ -107,6 +113,7 @@ def build_demo_dataset() -> dict[str, list[dict]]:
         carrier_name = next(c["name"] for c in carriers if c["id"] == carrier_id)
 
         contracts.append({
+            "tenant_id": tenant_id,
             "id": contract_id,
             "carrier_id": carrier_id,
             "effective_date": "2025-01-01",
@@ -122,6 +129,7 @@ def build_demo_dataset() -> dict[str, list[dict]]:
             }],
         })
         shipments.append({
+            "tenant_id": tenant_id,
             "id": shipment_id,
             "carrier_id": carrier_id,
             "contract_id": contract_id,
@@ -132,6 +140,7 @@ def build_demo_dataset() -> dict[str, list[dict]]:
             "notes": "Demo deterministic shipment",
         })
         bols.append({
+            "tenant_id": tenant_id,
             "id": bol_id,
             "shipment_id": shipment_id,
             "delivery_date": "2025-06-03",
@@ -139,6 +148,7 @@ def build_demo_dataset() -> dict[str, list[dict]]:
             "notes": "Demo deterministic BOL",
         })
         freight_bills.append({
+            "tenant_id": tenant_id,
             "id": bill_id,
             "carrier_id": carrier_id,
             "carrier_name": carrier_name,
@@ -182,6 +192,7 @@ def build_demo_dataset() -> dict[str, list[dict]]:
 
         contracts.extend([
             {
+                "tenant_id": tenant_id,
                 "id": standard_contract_id,
                 "carrier_id": carrier_id,
                 "effective_date": "2025-01-01",
@@ -197,6 +208,7 @@ def build_demo_dataset() -> dict[str, list[dict]]:
                 }],
             },
             {
+                "tenant_id": tenant_id,
                 "id": premium_contract_id,
                 "carrier_id": carrier_id,
                 "effective_date": "2025-01-01",
@@ -214,6 +226,7 @@ def build_demo_dataset() -> dict[str, list[dict]]:
             },
         ])
         shipments.append({
+            "tenant_id": tenant_id,
             "id": shipment_id,
             "carrier_id": carrier_id,
             "contract_id": premium_contract_id,
@@ -224,6 +237,7 @@ def build_demo_dataset() -> dict[str, list[dict]]:
             "notes": "Demo LLM path shipment; bill omits carrier_id to trigger carrier normalization",
         })
         bols.append({
+            "tenant_id": tenant_id,
             "id": bol_id,
             "shipment_id": shipment_id,
             "delivery_date": "2025-07-04",
@@ -231,6 +245,7 @@ def build_demo_dataset() -> dict[str, list[dict]]:
             "notes": "Demo LLM path BOL",
         })
         freight_bills.append({
+            "tenant_id": tenant_id,
             "id": bill_id,
             "carrier_id": None,
             "carrier_name": fuzzy_name,
@@ -257,38 +272,42 @@ def build_demo_dataset() -> dict[str, list[dict]]:
     }
 
 
-async def clear_demo_data(db: AsyncSession) -> dict[str, int]:
+async def clear_demo_data(db: AsyncSession, tenant_id: str | None = None) -> dict[str, int]:
     """Remove only demo-prefixed records."""
-    demo_bill_ids = select(FreightBill.id).where(FreightBill.id.like("DEMO-FB-%"))
+    tenant_id = normalize_tenant_id(tenant_id)
+    demo_bill_ids = select(FreightBill.id).where(
+        FreightBill.tenant_id == tenant_id,
+        FreightBill.id.like("DEMO-FB-%"),
+    )
 
     audit_result = await db.execute(
         delete(AuditLog)
-        .where(AuditLog.freight_bill_id.in_(demo_bill_ids))
+        .where(AuditLog.tenant_id == tenant_id, AuditLog.freight_bill_id.in_(demo_bill_ids))
         .execution_options(synchronize_session=False)
     )
     bill_result = await db.execute(
         delete(FreightBill)
-        .where(FreightBill.id.like("DEMO-FB-%"))
+        .where(FreightBill.tenant_id == tenant_id, FreightBill.id.like("DEMO-FB-%"))
         .execution_options(synchronize_session=False)
     )
     bol_result = await db.execute(
         delete(BillOfLading)
-        .where(BillOfLading.id.like("DEMO-BOL-%"))
+        .where(BillOfLading.tenant_id == tenant_id, BillOfLading.id.like("DEMO-BOL-%"))
         .execution_options(synchronize_session=False)
     )
     shipment_result = await db.execute(
         delete(Shipment)
-        .where(Shipment.id.like("DEMO-SHP-%"))
+        .where(Shipment.tenant_id == tenant_id, Shipment.id.like("DEMO-SHP-%"))
         .execution_options(synchronize_session=False)
     )
     contract_result = await db.execute(
         delete(CarrierContract)
-        .where(CarrierContract.id.like("DEMO-CC-%"))
+        .where(CarrierContract.tenant_id == tenant_id, CarrierContract.id.like("DEMO-CC-%"))
         .execution_options(synchronize_session=False)
     )
     carrier_result = await db.execute(
         delete(Carrier)
-        .where(Carrier.id.like("CAR-DEMO%"))
+        .where(Carrier.tenant_id == tenant_id, Carrier.id.like("CAR-DEMO%"))
         .execution_options(synchronize_session=False)
     )
 
@@ -303,10 +322,11 @@ async def clear_demo_data(db: AsyncSession) -> dict[str, int]:
     }
 
 
-async def load_demo_data(db: AsyncSession) -> dict:
+async def load_demo_data(db: AsyncSession, tenant_id: str | None = None) -> dict:
     """Clear existing demo records, load fresh demo records, and return bill payloads."""
-    removed = await clear_demo_data(db)
-    data = build_demo_dataset()
+    tenant_id = normalize_tenant_id(tenant_id)
+    removed = await clear_demo_data(db, tenant_id)
+    data = build_demo_dataset(tenant_id)
 
     for row in data["carriers"]:
         db.add(Carrier(**row))
@@ -334,6 +354,7 @@ async def load_demo_data(db: AsyncSession) -> dict:
             evidence={"demo": True, "demo_kind": demo_kind},
         ))
         db.add(AuditLog(
+            tenant_id=tenant_id,
             freight_bill_id=row["id"],
             event="demo_bill_loaded",
             detail={"source": "demo_data", "demo_kind": demo_kind},
