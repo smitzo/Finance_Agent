@@ -14,11 +14,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db_models import FreightBill, FreightBillStatus, AuditLog
+from app.tenancy import normalize_tenant_id
 
 logger = logging.getLogger(__name__)
 
 INGEST_ALLOWED_FIELDS = {
     "id",
+    "tenant_id",
     "carrier_id",
     "carrier_name",
     "bill_number",
@@ -46,27 +48,37 @@ def _map_decision_to_status(decision: str | None) -> FreightBillStatus:
     return FreightBillStatus.awaiting_review
 
 
-async def get_bill(db: AsyncSession, bill_id: str) -> FreightBill | None:
-    return await db.get(FreightBill, bill_id)
-
-
-async def list_bills(db: AsyncSession) -> list[FreightBill]:
+async def get_bill(db: AsyncSession, bill_id: str, tenant_id: str | None = None) -> FreightBill | None:
+    tenant_id = normalize_tenant_id(tenant_id)
     result = await db.execute(
-        select(FreightBill).order_by(FreightBill.created_at.desc())
+        select(FreightBill).where(FreightBill.id == bill_id, FreightBill.tenant_id == tenant_id)
+    )
+    return result.scalars().first()
+
+
+async def list_bills(db: AsyncSession, tenant_id: str | None = None) -> list[FreightBill]:
+    tenant_id = normalize_tenant_id(tenant_id)
+    result = await db.execute(
+        select(FreightBill)
+        .where(FreightBill.tenant_id == tenant_id)
+        .order_by(FreightBill.created_at.desc())
     )
     return result.scalars().all()
 
 
-async def list_review_queue(db: AsyncSession) -> list[FreightBill]:
+async def list_review_queue(db: AsyncSession, tenant_id: str | None = None) -> list[FreightBill]:
+    tenant_id = normalize_tenant_id(tenant_id)
     result = await db.execute(
         select(FreightBill)
-        .where(FreightBill.status == FreightBillStatus.awaiting_review)
+        .where(FreightBill.tenant_id == tenant_id, FreightBill.status == FreightBillStatus.awaiting_review)
         .order_by(FreightBill.created_at.asc())
     )
     return result.scalars().all()
 
 
-async def create_bill(db: AsyncSession, bill_data: dict) -> FreightBill:
+async def create_bill(db: AsyncSession, bill_data: dict, tenant_id: str | None = None) -> FreightBill:
+    tenant_id = normalize_tenant_id(tenant_id or bill_data.get("tenant_id"))
+    bill_data = {**bill_data, "tenant_id": tenant_id}
     known_data = {k: v for k, v in bill_data.items() if k in INGEST_ALLOWED_FIELDS}
     extra_data = {k: v for k, v in bill_data.items() if k not in INGEST_ALLOWED_FIELDS}
 
@@ -81,6 +93,7 @@ async def create_bill(db: AsyncSession, bill_data: dict) -> FreightBill:
 
 async def find_duplicate_bill(
     db: AsyncSession,
+    tenant_id: str | None,
     bill_number: str,
     carrier_id: str | None,
     carrier_name: str | None,
@@ -90,9 +103,11 @@ async def find_duplicate_bill(
     1) Prefer exact carrier_id + bill_number match.
     2) Fallback to case-insensitive carrier_name + bill_number when carrier_id is missing.
     """
+    tenant_id = normalize_tenant_id(tenant_id)
     if carrier_id:
         result = await db.execute(
             select(FreightBill).where(
+                FreightBill.tenant_id == tenant_id,
                 FreightBill.bill_number == bill_number,
                 FreightBill.carrier_id == carrier_id,
             )
@@ -103,7 +118,12 @@ async def find_duplicate_bill(
 
     normalized_name = (carrier_name or "").strip().lower()
     if normalized_name:
-        result = await db.execute(select(FreightBill).where(FreightBill.bill_number == bill_number))
+        result = await db.execute(
+            select(FreightBill).where(
+                FreightBill.tenant_id == tenant_id,
+                FreightBill.bill_number == bill_number,
+            )
+        )
         for row in result.scalars().all():
             if (row.carrier_name or "").strip().lower() == normalized_name:
                 return row
@@ -111,8 +131,8 @@ async def find_duplicate_bill(
     return None
 
 
-async def set_processing(db: AsyncSession, bill_id: str, thread_id: str) -> None:
-    fb = await db.get(FreightBill, bill_id)
+async def set_processing(db: AsyncSession, bill_id: str, thread_id: str, tenant_id: str | None = None) -> None:
+    fb = await get_bill(db, bill_id, tenant_id)
     if fb:
         fb.status = FreightBillStatus.processing
         fb.thread_id = thread_id
@@ -124,9 +144,11 @@ async def persist_result(
     bill_id: str,
     state: dict,
     interrupted: bool,
+    tenant_id: str | None = None,
 ) -> None:
     """Write agent findings, decision, confidence and status back to Postgres."""
-    fb = await db.get(FreightBill, bill_id)
+    tenant_id = normalize_tenant_id(tenant_id or state.get("tenant_id"))
+    fb = await get_bill(db, bill_id, tenant_id)
     if not fb:
         logger.warning(f"persist_result: bill {bill_id} not found")
         return
@@ -158,6 +180,7 @@ async def persist_result(
 
     for ev in audit_events:
         db.add(AuditLog(
+            tenant_id=tenant_id,
             freight_bill_id=bill_id,
             event=ev.get("event", "unknown"),
             detail=ev,
@@ -172,8 +195,10 @@ async def apply_reviewer_decision(
     bill_id: str,
     reviewer_decision: str,
     reviewer_notes: str | None,
+    tenant_id: str | None = None,
 ) -> FreightBill:
-    fb = await db.get(FreightBill, bill_id)
+    tenant_id = normalize_tenant_id(tenant_id)
+    fb = await get_bill(db, bill_id, tenant_id)
     if not fb:
         raise ValueError(f"Bill {bill_id} not found")
 
@@ -183,6 +208,7 @@ async def apply_reviewer_decision(
     fb.status = FreightBillStatus.processing
 
     db.add(AuditLog(
+        tenant_id=tenant_id,
         freight_bill_id=bill_id,
         event="reviewer_decision_submitted",
         detail={"decision": reviewer_decision, "notes": reviewer_notes},
@@ -191,17 +217,19 @@ async def apply_reviewer_decision(
     return fb
 
 
-async def get_audit_entries(db: AsyncSession, bill_id: str) -> list[AuditLog]:
+async def get_audit_entries(db: AsyncSession, bill_id: str, tenant_id: str | None = None) -> list[AuditLog]:
+    tenant_id = normalize_tenant_id(tenant_id)
     result = await db.execute(
         select(AuditLog)
-        .where(AuditLog.freight_bill_id == bill_id)
+        .where(AuditLog.tenant_id == tenant_id, AuditLog.freight_bill_id == bill_id)
         .order_by(AuditLog.created_at.asc())
     )
     return result.scalars().all()
 
 
-async def get_metrics(db: AsyncSession) -> dict:
-    result = await db.execute(select(FreightBill))
+async def get_metrics(db: AsyncSession, tenant_id: str | None = None) -> dict:
+    tenant_id = normalize_tenant_id(tenant_id)
+    result = await db.execute(select(FreightBill).where(FreightBill.tenant_id == tenant_id))
     all_bills = result.scalars().all()
 
     total = len(all_bills)
@@ -218,6 +246,7 @@ async def get_metrics(db: AsyncSession) -> dict:
             confidences.append(fb.confidence_score)
 
     return {
+        "tenant_id": tenant_id,
         "total_bills": total,
         "by_status": by_status,
         "by_decision": by_decision,
