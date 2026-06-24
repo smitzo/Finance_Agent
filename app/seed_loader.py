@@ -15,7 +15,8 @@ def main() -> None:
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
     cli_path = sys.argv[1] if len(sys.argv) > 1 else None
-    asyncio.run(load_seed(resolve_seed_path(cli_path)))
+    tenant_id = sys.argv[2] if len(sys.argv) > 2 else None
+    asyncio.run(load_seed(resolve_seed_path(cli_path), tenant_id=tenant_id))
 
 
 if __name__ == "__main__":
