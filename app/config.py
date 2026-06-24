@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # Database — async driver required
     database_url: str = DEFAULT_DATABASE_URL
 
+    # Multi-tenancy
+    default_tenant_id: str = "default"
+
     # LLM — at least one key required for LLM features
     llm_provider: str = "anthropic"          # "openai" | "anthropic"
     openai_api_key: str = ""
@@ -37,6 +40,15 @@ class Settings(BaseSettings):
 
     # Throughput controls
     max_concurrent_agent_runs: int = 8
+    bulk_ingest_batch_size: int = 250
+
+    # Graph backend
+    graph_backend: str = "neo4j"            # "neo4j" | "memory"
+    neo4j_uri: str = "bolt://localhost:7687"
+    neo4j_user: str = "neo4j"
+    neo4j_password: str = ""
+    neo4j_database: str = "neo4j"
+    neo4j_max_connection_pool_size: int = 50
 
     # Agent thresholds
     auto_approve_threshold: float = 0.85     # confidence >= this → auto_approve
