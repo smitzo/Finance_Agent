@@ -12,6 +12,7 @@ from app.agent.rules import (
     check_weight_vs_bol, check_total_amount,
     compute_confidence,
 )
+from app.agent.agent import validate
 
 
 # check_duplicate 
@@ -38,6 +39,32 @@ def test_carrier_unknown():
     f = check_carrier_known(None, "Gati KWE Logistics")
     assert f.severity == "error"
     assert f.code == "UNKNOWN_CARRIER"
+
+
+@pytest.mark.asyncio
+async def test_validate_does_not_treat_unresolved_carrier_id_as_known():
+    result = await validate({
+        "bill_id": "FB-UNKNOWN",
+        "bill": {
+            "carrier_id": "CAR-NOT-IN-MASTER",
+            "carrier_name": "Unknown Carrier",
+            "bill_number": "INV-UNKNOWN",
+            "base_charge": 100,
+            "fuel_surcharge": 10,
+            "gst_amount": 19.8,
+            "total_amount": 129.8,
+            "billed_weight_kg": 10,
+        },
+        "carrier": None,
+        "carrier_id": "CAR-NOT-IN-MASTER",
+        "existing_bill_ids": [],
+        "graph_anomalies": [],
+        "bols": [{"actual_weight_kg": 10}],
+        "prior_billed_weight": 0,
+    })
+
+    findings = {finding["code"]: finding for finding in result["findings"]}
+    assert findings["UNKNOWN_CARRIER"]["severity"] == "error"
 
 
 # check_contract_active 

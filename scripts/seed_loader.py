@@ -21,11 +21,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import AsyncSessionLocal, engine
+from app.db.session import AsyncSessionLocal
 from app.tenancy import normalize_tenant_id
 from app.models.db_models import (
     AuditLog,
-    Base,
     BillOfLading,
     Carrier,
     CarrierContract,
@@ -103,10 +102,6 @@ async def load_seed(seed_path: Path | None = None, tenant_id: str | None = None)
 
     with open(seed_path) as f:
         data = json.load(f)
-
-    # Ensure tables exist
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
 
     async with AsyncSessionLocal() as db:
         # Carriers
@@ -234,6 +229,10 @@ async def load_seed(seed_path: Path | None = None, tenant_id: str | None = None)
                 event="seed_bill_loaded",
                 detail={"source": "seed_loader"},
             ))
+            # The session intentionally disables autoflush. Flush each bill so
+            # the next business-key lookup can see it and skip duplicate seed
+            # scenarios before the database uniqueness constraint is reached.
+            await db.flush()
             print(f"  + FreightBill {fb['id']}")
 
         await db.commit()

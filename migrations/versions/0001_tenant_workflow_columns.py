@@ -1,7 +1,7 @@
 """tenant workflow columns
 
 Revision ID: 0001_tenant_workflow_columns
-Revises:
+Revises: 0000_initial_core_schema
 Create Date: 2026-06-24
 """
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 revision = "0001_tenant_workflow_columns"
-down_revision = None
+down_revision = "0000_initial_core_schema"
 branch_labels = None
 depends_on = None
 

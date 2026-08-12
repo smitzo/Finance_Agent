@@ -218,6 +218,10 @@ class FreightBill(Base):
 
     # LangGraph thread id for resuming
     thread_id = Column(String, nullable=True)
+    correlation_id = Column(String(64), nullable=True, index=True)
+    celery_task_id = Column(String(64), nullable=True)
+    processing_started_at = Column(DateTime, nullable=True)
+    processing_completed_at = Column(DateTime, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

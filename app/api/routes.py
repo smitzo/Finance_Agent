@@ -4,22 +4,20 @@ API Routes: HTTP endpoints for freight bill ingestion, review, and observability
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.agent import get_agent
 from app.auth import AuthenticatedUser, require_admin, require_current_user
-from app.config import get_settings
-from app.db.session import AsyncSessionLocal, get_db
+from app.db.session import get_db
 from app.models.db_models import AuditLog, Company, PartnerFirm, FreightBillStatus
+from app.observability import current_correlation_id
 from app.tenancy import tenant_from_header
 from app.workflows import FREIGHT_AUDIT, SUPPORTED_WORKFLOWS, is_supported_workflow
 from app.services.admin_data_service import clear_all_data
@@ -34,14 +32,11 @@ from app.services.freight_service import (
     get_metrics,
     list_bills,
     list_review_queue,
-    persist_result,
 )
 from app.services.graph_service import get_graph_service
+from app.worker.tasks import enqueue_bill, enqueue_review_resume
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
-_agent_run_semaphore = asyncio.Semaphore(max(1, settings.max_concurrent_agent_runs))
-
 router = APIRouter()
 
 
@@ -67,7 +62,7 @@ class FreightBillIn(BaseModel):
 
 
 class ReviewDecisionIn(BaseModel):
-    reviewer_decision: str
+    reviewer_decision: Literal["approve", "dispute", "reject"]
     reviewer_notes: str | None = None
 
 
@@ -119,114 +114,33 @@ class CompanyOut(BaseModel):
     ca_partner_firm: PartnerFirmOut | None
 
 
-async def run_agent_for_bill(bill_id: str, bill_dict: dict) -> None:
-    """Run the LangGraph agent and persist the final or interrupted state."""
-    logger.info("[%s] Agent run queued", bill_id)
-    async with _agent_run_semaphore:
-        logger.info("[%s] Agent run started", bill_id)
-        agent = get_agent()
-        tenant_id = bill_dict.get("tenant_id", settings.default_tenant_id)
-        thread_id = f"thread-{tenant_id}-{bill_id}"
-        config = {"configurable": {"thread_id": thread_id}}
-
-        graph_service = get_graph_service()
-        async with AsyncSessionLocal() as db:
-            await graph_service.ensure_built(db, tenant_id)
-        await graph_service.add_freight_bill(tenant_id, bill_id, {**bill_dict, "id": bill_id})
-
-        initial_state = {
-            "bill": bill_dict,
-            "bill_id": bill_id,
-            "tenant_id": tenant_id,
-            "carrier": None,
-            "carrier_id": bill_dict.get("carrier_id"),
-            "all_candidate_contracts": [],
-            "chosen_contract": None,
-            "shipment": None,
-            "bols": [],
-            "prior_billed_weight": 0.0,
-            "existing_bill_ids": [],
-            "graph_anomalies": [],
-            "findings": [],
-            "ambiguity_note": None,
-            "confidence": 0.0,
-            "decision": None,
-            "explanation": None,
-            "reviewer_decision": None,
-            "reviewer_notes": None,
-            "audit": [],
-        }
-
-        async with AsyncSessionLocal() as db:
-            fb = await get_bill(db, bill_id, tenant_id)
-            if fb:
-                fb.status = FreightBillStatus.processing
-                fb.thread_id = thread_id
-                await db.commit()
-                logger.info("[%s] Marked bill as processing (thread_id=%s)", bill_id, thread_id)
-
-        try:
-            async for _ in agent.astream(initial_state, config=config):
-                pass
-            state_snapshot = agent.get_state(config)
-            interrupted = bool(getattr(state_snapshot, "next", None))
-            if interrupted:
-                logger.info("[%s] Agent paused for human review", bill_id)
-            async with AsyncSessionLocal() as db:
-                await persist_result(db, bill_id, state_snapshot.values, interrupted=interrupted, tenant_id=tenant_id)
-            logger.info("[%s] Agent run completed (interrupted=%s)", bill_id, interrupted)
-        except Exception as exc:
-            exc_name = type(exc).__name__
-            if "GraphInterrupt" in exc_name or "Interrupt" in exc_name:
-                logger.info("[%s] Agent paused for human review", bill_id)
-                state_snapshot = agent.get_state(config)
-                async with AsyncSessionLocal() as db:
-                    await persist_result(db, bill_id, state_snapshot.values, interrupted=True, tenant_id=tenant_id)
-            elif (
-                isinstance(exc, RuntimeError)
-                and "get_configurable outside of a runnable context" in str(exc).lower()
-            ):
-                # Known compatibility issue seen with some Python/LangGraph combinations
-                # around interrupt() in async execution.
-                logger.warning(
-                    "[%s] Interrupt runtime compatibility issue detected; persisting latest state as awaiting_review",
-                    bill_id,
-                )
-                try:
-                    state_snapshot = agent.get_state(config)
-                    async with AsyncSessionLocal() as db:
-                        await persist_result(db, bill_id, state_snapshot.values, interrupted=True, tenant_id=tenant_id)
-                except Exception:
-                    logger.exception("[%s] Failed to persist fallback state after interrupt runtime issue", bill_id)
-            else:
-                logger.exception("[%s] Agent error: %s", bill_id, exc)
-                async with AsyncSessionLocal() as db:
-                    fb = await get_bill(db, bill_id, tenant_id)
-                    if fb:
-                        fb.status = FreightBillStatus.awaiting_review
-                        fb.decision_reason = f"Agent error: {exc}"
-                        db.add(
-                            AuditLog(
-                                tenant_id=tenant_id,
-                                freight_bill_id=bill_id,
-                                event="agent_error",
-                                detail={"error": str(exc)},
-                            )
-                        )
-                        await db.commit()
+class CompanyUpsertIn(BaseModel):
+    legal_name: str = Field(min_length=2, max_length=200)
+    display_name: str = Field(min_length=2, max_length=160)
+    gstin: str | None = Field(default=None, max_length=20)
+    country: str = Field(default="IN", min_length=2, max_length=2)
+    timezone: str = Field(default="Asia/Kolkata", max_length=60)
+    billing_email: str = Field(min_length=3, max_length=200)
 
 
-async def run_agent_batch(bill_items: list[dict]) -> None:
-    """Run accepted bills in bounded chunks instead of creating one background task per bill."""
-    batch_size = max(1, settings.bulk_ingest_batch_size)
-    for start in range(0, len(bill_items), batch_size):
-        chunk = bill_items[start:start + batch_size]
-        await asyncio.gather(*(run_agent_for_bill(item["id"], item) for item in chunk))
+class PartnerFirmUpsertIn(BaseModel):
+    name: str = Field(min_length=2, max_length=200)
+    registration_number: str | None = Field(default=None, max_length=80)
+    gstin: str | None = Field(default=None, max_length=20)
+    contact_name: str = Field(min_length=2, max_length=120)
+    contact_email: str = Field(min_length=3, max_length=200)
+    contact_phone: str | None = Field(default=None, max_length=40)
+
+
+class SessionOut(BaseModel):
+    username: str
+    role: str
+    tenant_id: str
+    is_demo: bool
 
 
 async def _ingest_one_bill(
     payload: FreightBillIn,
-    background_tasks: BackgroundTasks,
     db: AsyncSession,
     tenant_id: str,
     queue_agent: bool = True,
@@ -312,45 +226,28 @@ async def _ingest_one_bill(
     })
     logger.info("[%s] Ingest request received (extra_keys=%s)", bill_id, extra_keys)
 
-    await create_bill(db, bill_data, tenant_id)
-    db.add(AuditLog(tenant_id=tenant_id, freight_bill_id=bill_id, event="bill_ingested", detail={"source": "api"}))
+    correlation_id = current_correlation_id()
+    freight_bill = await create_bill(db, bill_data, tenant_id)
+    freight_bill.correlation_id = correlation_id
+    db.add(AuditLog(
+        tenant_id=tenant_id,
+        freight_bill_id=bill_id,
+        event="bill_ingested",
+        detail={"source": "api", "correlation_id": correlation_id},
+    ))
     await db.commit()
 
     if queue_agent:
-        background_tasks.add_task(run_agent_for_bill, bill_id, bill_data)
+        freight_bill.celery_task_id = enqueue_bill(bill_id, bill_data, correlation_id)
+        await db.commit()
     return {
         "id": bill_id,
         "accepted": True,
-        "status": "processing",
-        "message": "Bill ingested — agent processing started",
+        "status": "pending",
+        "message": "Bill ingested and queued for agent processing",
         "_bill_data": bill_data,
+        "_correlation_id": correlation_id,
     }
-
-
-async def resume_agent(
-    bill_id: str,
-    tenant_id: str,
-    thread_id: str,
-    reviewer_decision: str,
-    reviewer_notes: str | None,
-) -> None:
-    """Resume an interrupted LangGraph thread from the human review node."""
-    agent = get_agent()
-    config = {"configurable": {"thread_id": thread_id}}
-
-    try:
-        agent.update_state(
-            config,
-            {"reviewer_decision": reviewer_decision, "reviewer_notes": reviewer_notes or ""},
-            as_node="human_review",
-        )
-        async for _ in agent.astream(None, config=config):
-            pass
-        state_snapshot = agent.get_state(config)
-        async with AsyncSessionLocal() as db:
-            await persist_result(db, bill_id, state_snapshot.values, interrupted=False, tenant_id=tenant_id)
-    except Exception as exc:
-        logger.exception("[%s] Resume error: %s", bill_id, exc)
 
 
 @router.get("/health")
@@ -369,6 +266,19 @@ async def health_graph() -> dict:
     graph_service = get_graph_service()
     result = await graph_service.health()
     return {**result, "timestamp": datetime.utcnow().isoformat()}
+
+
+@router.get("/session", response_model=SessionOut, tags=["Authentication"])
+async def current_session(
+    tenant_id: str = Depends(tenant_from_header),
+    user: AuthenticatedUser = Depends(require_current_user),
+) -> SessionOut:
+    return SessionOut(
+        username=user.username,
+        role=user.role,
+        tenant_id=tenant_id,
+        is_demo=user.role == "demo_admin",
+    )
 
 
 @router.get("/workflows")
@@ -428,6 +338,39 @@ async def get_company_profile(
     )
 
 
+@router.put("/company", response_model=CompanyOut)
+async def upsert_company_profile(
+    payload: CompanyUpsertIn,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(tenant_from_header),
+    _: AuthenticatedUser = Depends(require_admin),
+) -> CompanyOut:
+    result = await db.execute(
+        select(Company).where(Company.tenant_id == tenant_id).order_by(Company.created_at.asc())
+    )
+    company = result.scalars().first()
+    if company is None:
+        company = Company(id=f"COM-{uuid.uuid4().hex[:10].upper()}", tenant_id=tenant_id)
+        db.add(company)
+    for field, value in payload.model_dump().items():
+        setattr(company, field, value)
+    company.status = "active"
+    await db.commit()
+    await db.refresh(company)
+    return CompanyOut(
+        id=company.id,
+        tenant_id=company.tenant_id,
+        legal_name=company.legal_name,
+        display_name=company.display_name,
+        gstin=company.gstin,
+        country=company.country,
+        timezone=company.timezone,
+        billing_email=company.billing_email,
+        status=company.status,
+        ca_partner_firm=None,
+    )
+
+
 @router.get("/partner-firms", response_model=list[PartnerFirmOut])
 async def list_partner_firms(
     db: AsyncSession = Depends(get_db),
@@ -455,6 +398,45 @@ async def list_partner_firms(
     ]
 
 
+@router.post("/partner-firms", response_model=PartnerFirmOut)
+async def upsert_partner_firm(
+    payload: PartnerFirmUpsertIn,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(tenant_from_header),
+    _: AuthenticatedUser = Depends(require_admin),
+) -> PartnerFirmOut:
+    result = await db.execute(
+        select(PartnerFirm).where(
+            PartnerFirm.tenant_id == tenant_id,
+            PartnerFirm.name == payload.name,
+        )
+    )
+    partner = result.scalars().first()
+    if partner is None:
+        partner = PartnerFirm(
+            id=f"PF-{uuid.uuid4().hex[:10].upper()}",
+            tenant_id=tenant_id,
+            firm_type="ca_firm",
+        )
+        db.add(partner)
+    for field, value in payload.model_dump().items():
+        setattr(partner, field, value)
+    partner.status = "active"
+    await db.commit()
+    await db.refresh(partner)
+    return PartnerFirmOut(
+        id=partner.id,
+        name=partner.name,
+        firm_type=partner.firm_type,
+        registration_number=partner.registration_number,
+        gstin=partner.gstin,
+        contact_name=partner.contact_name,
+        contact_email=partner.contact_email,
+        contact_phone=partner.contact_phone,
+        status=partner.status,
+    )
+
+
 @router.post("/admin/rebuild-graph", tags=["Admin"], summary="Rebuild in-memory graph")
 async def rebuild_graph(
     db: AsyncSession = Depends(get_db),
@@ -468,7 +450,6 @@ async def rebuild_graph(
 
 @router.post("/admin/demo/load", status_code=202, tags=["Admin"], summary="Load and process demo data")
 async def load_and_process_demo_data(
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     tenant_id: str = Depends(tenant_from_header),
     _: AuthenticatedUser = Depends(require_admin),
@@ -478,19 +459,36 @@ async def load_and_process_demo_data(
     graph_service = get_graph_service()
     await graph_service.build(db, tenant_id)
 
+    correlation_id = current_correlation_id()
     for bill_data in result["bill_payloads"]:
-        background_tasks.add_task(run_agent_for_bill, bill_data["id"], bill_data)
+        task_id = enqueue_bill(bill_data["id"], bill_data, correlation_id)
+        freight_bill = await get_bill(db, bill_data["id"], tenant_id)
+        if freight_bill:
+            freight_bill.correlation_id = correlation_id
+            freight_bill.celery_task_id = task_id
+    await db.commit()
 
     return {
         "status": "processing",
         "message": (
-            "Demo data loaded and 20 freight bills queued. "
+            f"Demo data loaded and {len(result['bill_payloads'])} freight bills queued. "
             "Open logs/app.log to watch deterministic and LLM paths."
         ),
         "loaded": result["loaded"],
         "removed_before_load": result["removed"],
-        "deterministic_bill_ids": [b["id"] for b in result["bill_payloads"] if b["carrier_id"]],
-        "llm_bill_ids": [b["id"] for b in result["bill_payloads"] if not b["carrier_id"]],
+        "deterministic_bill_ids": [
+            item["bill_id"] for item in result["bill_scenarios"]
+            if item["category"] == "deterministic"
+        ],
+        "llm_bill_ids": [
+            item["bill_id"] for item in result["bill_scenarios"]
+            if item["category"] == "llm"
+        ],
+        "edge_case_bill_ids": [
+            item["bill_id"] for item in result["bill_scenarios"]
+            if item["category"] == "edge"
+        ],
+        "scenario_catalog": result["bill_scenarios"],
     }
 
 
@@ -536,14 +534,13 @@ async def remove_all_data(
 @router.post("/freight-bills", status_code=202)
 async def ingest_freight_bill(
     payload: FreightBillIn | list[FreightBillIn],
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     tenant_id: str = Depends(tenant_from_header),
     _: AuthenticatedUser = Depends(require_current_user),
 ) -> dict:
     # Backward-compatible single ingest
     if isinstance(payload, FreightBillIn):
-        result = await _ingest_one_bill(payload, background_tasks, db, tenant_id)
+        result = await _ingest_one_bill(payload, db, tenant_id)
         if not result["accepted"]:
             raise HTTPException(status_code=409, detail=result["error"])
         return {
@@ -560,10 +557,14 @@ async def ingest_freight_bill(
     accepted_bill_items: list[dict] = []
     for item in payload:
         try:
-            result = await _ingest_one_bill(item, background_tasks, db, tenant_id, queue_agent=False)
+            result = await _ingest_one_bill(item, db, tenant_id, queue_agent=False)
             if result.get("accepted") and result.get("_bill_data"):
-                accepted_bill_items.append(result["_bill_data"])
+                accepted_bill_items.append({
+                    "bill": result["_bill_data"],
+                    "correlation_id": result["_correlation_id"],
+                })
             result.pop("_bill_data", None)
+            result.pop("_correlation_id", None)
             results.append(result)
         except Exception as exc:
             await db.rollback()
@@ -578,8 +579,14 @@ async def ingest_freight_bill(
 
     accepted = sum(1 for r in results if r.get("accepted"))
     rejected = len(results) - accepted
+    for item in accepted_bill_items:
+        bill_data = item["bill"]
+        task_id = enqueue_bill(bill_data["id"], bill_data, item["correlation_id"])
+        freight_bill = await get_bill(db, bill_data["id"], tenant_id)
+        if freight_bill:
+            freight_bill.celery_task_id = task_id
     if accepted_bill_items:
-        background_tasks.add_task(run_agent_batch, accepted_bill_items)
+        await db.commit()
     return {
         "total": len(results),
         "accepted": accepted,
@@ -636,11 +643,14 @@ async def list_freight_bills(
             "workflow_type": fb.workflow_type,
             "carrier_name": fb.carrier_name,
             "bill_number": fb.bill_number,
+            "bill_date": fb.bill_date,
             "lane": fb.lane,
             "total_amount": fb.total_amount,
             "status": fb.status.value if fb.status else "unknown",
             "confidence_score": fb.confidence_score,
             "decision": fb.decision,
+            "decision_reason": fb.decision_reason,
+            "created_at": fb.created_at,
         }
         for fb in bills
     ]
@@ -662,8 +672,10 @@ async def review_queue(
             "workflow_type": fb.workflow_type,
             "carrier_name": fb.carrier_name,
             "bill_number": fb.bill_number,
+            "bill_date": fb.bill_date,
             "lane": fb.lane,
             "total_amount": fb.total_amount,
+            "status": fb.status.value if fb.status else "unknown",
             "confidence_score": fb.confidence_score,
             "decision": fb.decision,
             "decision_reason": fb.decision_reason,
@@ -678,7 +690,6 @@ async def review_queue(
 async def submit_review(
     bill_id: str,
     payload: ReviewDecisionIn,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     tenant_id: str = Depends(tenant_from_header),
     _: AuthenticatedUser = Depends(require_current_user),
@@ -702,15 +713,18 @@ async def submit_review(
         tenant_id=tenant_id,
     )
     logger.info("[%s] Reviewer decision submitted (%s)", bill_id, payload.reviewer_decision)
-    background_tasks.add_task(
-        resume_agent,
+    correlation_id = current_correlation_id()
+    updated.correlation_id = correlation_id
+    updated.celery_task_id = enqueue_review_resume(
         bill_id,
         tenant_id,
         updated.thread_id or "",
         payload.reviewer_decision,
         payload.reviewer_notes,
+        correlation_id,
     )
-    return {"id": bill_id, "message": "Review submitted — agent resuming"}
+    await db.commit()
+    return {"id": bill_id, "message": "Review submitted and queued for agent resume"}
 
 
 @router.get("/freight-bills/{bill_id}/audit")

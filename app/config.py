@@ -28,12 +28,21 @@ class Settings(BaseSettings):
     # Database — async driver required
     database_url: str = DEFAULT_DATABASE_URL
 
+    # Durable worker and checkpoint infrastructure
+    celery_broker_url: str = "redis://localhost:6379/0"
+    celery_result_backend: str = "redis://localhost:6379/1"
+    celery_task_always_eager: bool = False
+    checkpoint_pool_size: int = 5
+
     # Multi-tenancy
     default_tenant_id: str = "default"
 
     # Authentication bootstrap user. Replace with DB-backed users before public deployment.
     admin_username: str = "admin"
     admin_password: str = "admin"
+    demo_tenant_id: str = "demo"
+    demo_username: str = "demo"
+    demo_password: str = "demo"
 
     # LLM — at least one key required for LLM features
     llm_provider: str = "anthropic"          # "openai" | "anthropic"
@@ -43,10 +52,6 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     llm_debug_payloads: bool = False
     llm_circuit_breaker_cooldown_seconds: int = 60
-
-    # Throughput controls
-    max_concurrent_agent_runs: int = 8
-    bulk_ingest_batch_size: int = 250
 
     # Graph backend
     graph_backend: str = "neo4j"            # "neo4j" | "memory"

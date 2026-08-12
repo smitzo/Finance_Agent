@@ -17,6 +17,17 @@ if config.config_file_name is not None:
 settings = get_settings()
 config.set_main_option("sqlalchemy.url", settings.database_url)
 target_metadata = Base.metadata
+LANGGRAPH_CHECKPOINT_TABLES = {
+    "checkpoint_migrations",
+    "checkpoints",
+    "checkpoint_blobs",
+    "checkpoint_writes",
+}
+
+
+def include_name(name: str | None, type_: str, _parent_names: dict) -> bool:
+    """Keep LangGraph-owned checkpoint tables outside Alembic autogenerate."""
+    return not (type_ == "table" and name in LANGGRAPH_CHECKPOINT_TABLES)
 
 
 def run_migrations_offline() -> None:
@@ -25,13 +36,18 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_name=include_name,
     )
     with context.begin_transaction():
         context.run_migrations()
 
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        include_name=include_name,
+    )
     with context.begin_transaction():
         context.run_migrations()
 

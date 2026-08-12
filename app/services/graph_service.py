@@ -27,6 +27,8 @@ settings = get_settings()
 
 
 class GraphBackend(Protocol):
+    process_local: bool
+
     async def build(self, db: AsyncSession, tenant_id: str) -> None: ...
     async def add_freight_bill(self, tenant_id: str, fb_id: str, fb_data: dict) -> None: ...
     async def list_carriers(self, tenant_id: str) -> list[dict]: ...
@@ -50,6 +52,8 @@ class GraphBackend(Protocol):
 
 class MemoryGraphBackend:
     """In-process graph backend for tests and local fallback."""
+
+    process_local = True
 
     def __init__(self) -> None:
         self._nodes: dict[str, dict[str, dict]] = defaultdict(dict)
@@ -304,18 +308,23 @@ class MemoryGraphBackend:
                 if (c.get("matched_rate_row") or {}).get("rate_per_kg") is not None
             ]
             billed_rate = float(fb.get("rate_per_kg") or 0)
-            if contracted_rates and billed_rate > min(contracted_rates) * 1.20:
+            # With overlapping standard/premium contracts, a bill can be valid
+            # at the higher rate. It is an outlier only when it exceeds every
+            # candidate rate by more than 20%.
+            if contracted_rates and billed_rate > max(contracted_rates) * 1.20:
                 anomalies.append({
                     "code": "GRAPH_RATE_OUTLIER",
                     "severity": "error",
                     "message": "Graph traversal found a billed rate more than 20% above contract rate",
-                    "detail": {"billed_rate": billed_rate, "contracted_rate": min(contracted_rates)},
+                    "detail": {"billed_rate": billed_rate, "contracted_rate": max(contracted_rates)},
                 })
 
         return anomalies
 
 
 class Neo4jGraphBackend:
+    process_local = False
+
     """Neo4j-backed graph traversal store for production workloads."""
 
     def __init__(self) -> None:
@@ -343,7 +352,8 @@ class Neo4jGraphBackend:
 
     @staticmethod
     def _contract_props(row: dict) -> dict:
-        return {**row, "rate_card_json": json.dumps(row.pop("rate_card", []))}
+        rate_card = row.pop("rate_card", [])
+        return {**row, "rate_card_json": json.dumps(rate_card)}
 
     async def _ensure_schema(self) -> None:
         if self._schema_ready:
@@ -616,8 +626,7 @@ class Neo4jGraphBackend:
         rows = await self._execute(
             """
             MATCH (fb:FreightBill {tenant_id: $tenant_id, id: $bill_id})
-            CALL {
-              WITH fb
+            CALL (fb) {
               MATCH (other:FreightBill {tenant_id: fb.tenant_id, bill_number: fb.bill_number})
               WHERE other.id <> fb.id
                 AND (
@@ -626,15 +635,13 @@ class Neo4jGraphBackend:
                 )
               RETURN collect(other.id) AS duplicate_ids
             }
-            CALL {
-              WITH fb
+            CALL (fb) {
               OPTIONAL MATCH (fb)-[:REFERENCES]->(:Shipment)-[:HAS_BOL]->(bol:BOL)
               RETURN sum(coalesce(bol.actual_weight_kg, 0)) AS bol_weight
             }
-            CALL {
-              WITH fb
+            CALL (fb) {
               OPTIONAL MATCH (:Carrier {tenant_id: fb.tenant_id, id: fb.carrier_id})-[:HAS_CONTRACT]->(:Contract)-[r:COVERS_LANE]->(:Lane {tenant_id: fb.tenant_id, lane: fb.lane})
-              RETURN min(r.rate_per_kg) AS contracted_rate
+              RETURN max(r.rate_per_kg) AS contracted_rate
             }
             RETURN properties(fb) AS bill,
                    duplicate_ids,
@@ -741,8 +748,16 @@ class GraphService:
 
     async def ensure_built(self, db: AsyncSession, tenant_id: str = "default") -> None:
         tenant_id = normalize_tenant_id(tenant_id)
-        if tenant_id not in self._built_tenants:
-            await self.build(db, tenant_id)
+        if tenant_id in self._built_tenants:
+            return
+        if not self.backend.process_local:
+            # Neo4j is shared by API and worker processes. Rebuilding it from
+            # every prefork child would delete nodes while sibling tasks query
+            # them. The API/admin build path owns full refreshes; workers only
+            # add the current bill incrementally.
+            self._built_tenants.add(tenant_id)
+            return
+        await self.build(db, tenant_id)
 
     async def add_freight_bill(self, tenant_id: str, fb_id: str, fb_data: dict) -> None:
         await self.backend.add_freight_bill(normalize_tenant_id(tenant_id), fb_id, fb_data)

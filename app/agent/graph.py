@@ -1,5 +1,5 @@
-""" Compatibility wrapper for agent graph exports. Keeps imports stable for code that expects app.agent.graph."""
+"""Compatibility wrapper for stable agent graph imports."""
 
-from app.agent.agent import AgentState, build_agent, get_agent
+from app.agent.agent import AgentState, build_agent
 
-__all__ = ["AgentState", "build_agent", "get_agent"]
+__all__ = ["AgentState", "build_agent"]

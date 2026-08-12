@@ -23,7 +23,8 @@ A LangGraph stateful agent with the following node flow:
                                           │
                                           └──► [finalize] ──► END
 
-State is persisted via LangGraph's MemorySaver (dev) or AsyncPostgresSaver (prod).
+State is persisted via LangGraph's AsyncPostgresSaver so interrupted workflows
+survive API and worker restarts.
 """
 
 from __future__ import annotations
@@ -34,7 +35,6 @@ from typing import TypedDict, Annotated
 import operator
 
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import interrupt
 
 from app.config import get_settings
@@ -229,8 +229,11 @@ async def validate(state: AgentState) -> dict:
     )))
 
     # 2. Carrier known in system
+    # Presence of a submitted carrier_id is not proof that the carrier exists.
+    # Only the graph-resolved carrier object establishes known reference data.
+    resolved_carrier = state.get("carrier") or {}
     findings.append(_finding_to_dict(
-        rules.check_carrier_known(state.get("carrier_id"), bill.get("carrier_name", ""))
+        rules.check_carrier_known(resolved_carrier.get("id"), bill.get("carrier_name", ""))
     ))
 
     # 3. Internal total consistency (base + fsc + gst = total)
@@ -527,9 +530,9 @@ def route_after_decide(state: AgentState) -> str:
 
 # Build Graph 
 
-def build_agent(checkpointer=None):
+def build_agent(checkpointer):
     """
-    Build and compile the LangGraph agent. Pass a checkpointer to enable state persistence across interrupt/resume cycles.
+    Build and compile the LangGraph agent with a durable checkpointer.
     """
     builder = StateGraph(AgentState)
 
@@ -551,18 +554,4 @@ def build_agent(checkpointer=None):
     builder.add_edge("human_review", "finalize")
     builder.add_edge("finalize", END)
 
-    return builder.compile(checkpointer=checkpointer or MemorySaver())
-
-
-# ── Singleton ─────────────────────────────────────────────────────────────────
-# MemorySaver for dev — swap to AsyncPostgresSaver for production so agent
-# state survives restarts and can resume interrupted threads after a redeploy.
-
-_agent = None
-
-
-def get_agent():
-    global _agent
-    if _agent is None:
-        _agent = build_agent(MemorySaver())
-    return _agent
+    return builder.compile(checkpointer=checkpointer)

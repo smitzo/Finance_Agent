@@ -1,5 +1,5 @@
 """
-Application Entry Point: Creates the FastAPI app, initializes DB schema, and builds the in-memory graph.
+Application entry point. Database schema changes are applied only by Alembic.
 """
 
 from __future__ import annotations
@@ -7,7 +7,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -20,35 +19,13 @@ from app.api.dashboard_routes import router as dashboard_router
 from app.api.routes import router as api_router
 from app.config import get_settings
 from app.db.session import AsyncSessionLocal, database_url, engine
-from app.models.db_models import Base
+from app.observability import configure_logging, correlation_middleware
 from app.services.graph_service import get_graph_service
 
 settings = get_settings()
 
 
-def _configure_logging() -> Path:
-    logs_dir = Path(settings.log_dir)
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    log_file_path = logs_dir / settings.log_file_name
-
-    logging.basicConfig(
-        level=getattr(logging, settings.log_level.upper(), logging.INFO),
-        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-        handlers=[
-            logging.StreamHandler(),
-            RotatingFileHandler(
-                filename=log_file_path,
-                maxBytes=settings.log_max_bytes,
-                backupCount=settings.log_backup_count,
-                encoding="utf-8",
-            ),
-        ],
-        force=True,
-    )
-    return log_file_path
-
-
-_log_file_path = _configure_logging()
+_log_file_path = configure_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -79,6 +56,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.middleware("http")(correlation_middleware)
 
 dashboard_static_dir = Path(__file__).resolve().parent / "dashboard" / "static"
 app.mount("/dashboard/static", StaticFiles(directory=dashboard_static_dir), name="dashboard-static")
@@ -98,10 +76,6 @@ async def startup() -> None:
         await conn.execute(text("SELECT 1"))
     logger.info("Startup: database connectivity check passed")
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("Startup: database schema ensured")
-
     async with AsyncSessionLocal() as db:
         graph_service = get_graph_service()
         await graph_service.build(db, settings.default_tenant_id)
@@ -115,3 +89,4 @@ async def shutdown() -> None:
     if close:
         await close()
         logger.info("Shutdown: graph backend closed")
+    await engine.dispose()

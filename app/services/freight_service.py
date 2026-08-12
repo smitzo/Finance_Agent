@@ -213,6 +213,7 @@ async def persist_result(
         fb.status = FreightBillStatus.awaiting_review
     else:
         fb.status = _map_decision_to_status(decision)
+    fb.processing_completed_at = datetime.utcnow()
 
     for ev in audit_events:
         db.add(AuditLog(

@@ -4,9 +4,11 @@ sqlalchemy[asyncio]==2.0.36
 asyncpg==0.30.0
 alembic==1.14.0
 psycopg2-binary==2.9.10
+psycopg[binary]==3.3.4
 pydantic==2.10.3
 pydantic-settings==2.6.1
 langgraph==0.2.56
+langgraph-checkpoint-postgres==2.0.21
 langchain==0.3.12
 langchain-anthropic==0.3.2
 langchain-openai==0.2.12
@@ -17,3 +19,5 @@ python-dotenv==1.0.1
 httpx==0.28.1
 pytest==8.3.4
 pytest-asyncio==0.24.0
+celery[redis]==5.4.0
+structlog==24.4.0
