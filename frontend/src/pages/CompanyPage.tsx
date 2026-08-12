@@ -36,10 +36,17 @@ export function CompanyPage() {
     setDraft((current) => ({ ...current, [field]: value }));
   }
 
-  function saveDraft() {
-    localStorage.setItem("company-draft", JSON.stringify(draft));
-    setMessage("Company draft saved locally.");
-    showToast("Company draft saved.", "success");
+  async function saveDraft() {
+    if (!session) return;
+    try {
+      const saved = await api.saveCompany(session, draft);
+      setProfile(saved);
+      localStorage.setItem("company-draft", JSON.stringify(draft));
+      setMessage("Company profile saved to the tenant workspace.");
+      showToast("Company profile saved.", "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Company could not be saved.", "error");
+    }
   }
 
   return (
@@ -61,7 +68,7 @@ export function CompanyPage() {
             </Select>
           </div>
           <div className="flex justify-end">
-            <Button icon={<Save className="h-4 w-4" />} onClick={saveDraft}>Save company draft</Button>
+            <Button icon={<Save className="h-4 w-4" />} onClick={saveDraft}>Save company profile</Button>
           </div>
         </CardBody>
       </Card>
@@ -80,7 +87,7 @@ export function CompanyPage() {
               <p><span className="text-slate-500 dark:text-zinc-400">CA firm:</span> {profile.ca_partner_firm?.name ?? "Not linked"}</p>
             </>
           ) : (
-            <p className="text-slate-500 dark:text-zinc-400">No company profile found yet. Load demo data or save a draft.</p>
+            <p className="text-slate-500 dark:text-zinc-400">No company profile found yet. Complete the form and save it to this workspace.</p>
           )}
         </CardBody>
       </Card>

@@ -17,7 +17,7 @@ export function FieldShell({ label, hint, children }: FieldShellProps) {
 }
 
 const fieldClass =
-  "h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-white/10 dark:bg-white/10 dark:text-white dark:placeholder:text-zinc-500";
+  "h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15 dark:border-white/10 dark:bg-white/[0.06] dark:text-white dark:placeholder:text-zinc-500";
 
 type InputProps = InputHTMLAttributes<HTMLInputElement> & {
   label: string;

@@ -38,10 +38,17 @@ export function PartnerPage() {
     setDraft((current) => ({ ...current, [field]: value }));
   }
 
-  function saveDraft() {
-    localStorage.setItem("partner-draft", JSON.stringify(draft));
-    setMessage("Partner draft saved locally.");
-    showToast("Partner draft saved.", "success");
+  async function saveDraft() {
+    if (!session) return;
+    try {
+      const saved = await api.savePartner(session, draft);
+      setPartners((current) => [...current.filter((partner) => partner.id !== saved.id), saved]);
+      localStorage.setItem("partner-draft", JSON.stringify(draft));
+      setMessage("Partner firm saved to the tenant workspace.");
+      showToast("Partner firm saved.", "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Partner could not be saved.", "error");
+    }
   }
 
   return (
@@ -60,7 +67,7 @@ export function PartnerPage() {
             <Input label="Contact phone" value={draft.contactPhone} onChange={(event) => update("contactPhone", event.target.value)} />
           </div>
           <div className="flex justify-end">
-            <Button icon={<Save className="h-4 w-4" />} onClick={saveDraft}>Save partner draft</Button>
+            <Button icon={<Save className="h-4 w-4" />} onClick={saveDraft}>Save partner firm</Button>
           </div>
         </CardBody>
       </Card>
@@ -83,7 +90,7 @@ export function PartnerPage() {
           ))}
           {!partners.length ? (
             <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500 dark:bg-white/5 dark:text-zinc-400">
-              No partner firms found yet. Load demo data or save a local draft.
+              No partner firms found yet. Add the firm that should receive audit exceptions.
             </p>
           ) : null}
         </CardBody>

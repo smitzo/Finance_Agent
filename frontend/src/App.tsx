@@ -5,8 +5,11 @@ import { AppLayout } from "./layout/AppLayout";
 import { CompanyPage } from "./pages/CompanyPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { PartnerPage } from "./pages/PartnerPage";
+import { BillsPage } from "./pages/BillsPage";
+import { ReviewQueuePage } from "./pages/ReviewQueuePage";
+import { AnalyticsPage } from "./pages/AnalyticsPage";
 
-type Page = "overview" | "company" | "partner";
+export type Page = "overview" | "bills" | "reviews" | "analytics" | "company" | "partner";
 
 export function App() {
   const { session } = useAuth();
@@ -19,7 +22,10 @@ export function App() {
   return (
     <AppLayout activePage={page} onNavigate={(nextPage) => setPage(nextPage as Page)}>
       <>
-        {page === "overview" ? <OverviewPage /> : null}
+        {page === "overview" ? <OverviewPage onNavigate={setPage} /> : null}
+        {page === "bills" ? <BillsPage /> : null}
+        {page === "reviews" ? <ReviewQueuePage /> : null}
+        {page === "analytics" ? <AnalyticsPage /> : null}
         {page === "company" ? <CompanyPage /> : null}
         {page === "partner" ? <PartnerPage /> : null}
       </>

@@ -10,7 +10,7 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 function storedSession(): UserSession | null {
-  const raw = localStorage.getItem("freight-session");
+  const raw = sessionStorage.getItem("freight-session");
   if (!raw) {
     return null;
   }
@@ -28,11 +28,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       session,
       login: (nextSession) => {
-        localStorage.setItem("freight-session", JSON.stringify(nextSession));
+        sessionStorage.setItem("freight-session", JSON.stringify(nextSession));
         setSession(nextSession);
       },
       logout: () => {
-        localStorage.removeItem("freight-session");
+        sessionStorage.removeItem("freight-session");
         setSession(null);
       },
     }),

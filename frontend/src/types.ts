@@ -6,6 +6,13 @@ export type UserSession = {
   tenantId: string;
 };
 
+export type SessionProfile = {
+  username: string;
+  role: string;
+  tenant_id: string;
+  is_demo: boolean;
+};
+
 export type CompanyDraft = {
   legalName: string;
   displayName: string;
@@ -29,11 +36,43 @@ export type FreightBill = {
   workflow_type: string;
   carrier_name: string;
   bill_number: string;
+  bill_date?: string;
   lane: string;
   total_amount: number;
   status: string;
   confidence_score: number | null;
   decision: string | null;
+  decision_reason?: string | null;
+  evidence?: FreightEvidence | null;
+  created_at?: string;
+};
+
+export type FreightEvidence = {
+  findings?: Array<{ code?: string; severity?: string; message?: string }>;
+  chosen_contract?: { id?: string } | null;
+  ambiguity_note?: string | null;
+  graph_anomalies?: Array<Record<string, unknown>>;
+};
+
+export type NewFreightBill = {
+  carrier_id?: string;
+  carrier_name: string;
+  bill_number: string;
+  bill_date: string;
+  shipment_reference?: string;
+  lane: string;
+  billed_weight_kg: number;
+  rate_per_kg?: number;
+  base_charge: number;
+  fuel_surcharge: number;
+  gst_amount: number;
+  total_amount: number;
+};
+
+export type AuditEvent = {
+  event: string;
+  detail: Record<string, unknown> | null;
+  created_at: string;
 };
 
 export type Metrics = {
