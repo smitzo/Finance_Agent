@@ -1,4 +1,4 @@
-import { ArrowRight, BarChart3, Check, CheckCircle2, CircleDollarSign, FileSearch, KeyRound, Menu, ShieldCheck, Sparkles, Truck, X, Zap } from "lucide-react";
+import { ArrowRight, BarChart3, Check, CheckCircle2, CircleDollarSign, FileSearch, KeyRound, Menu, Play, ShieldCheck, Sparkles, Truck, X, Zap } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { Button } from "../../components/ui/Button";
@@ -6,7 +6,7 @@ import { Input } from "../../components/ui/Input";
 
 const proof = ["Contract-aware validation", "Human-in-the-loop controls", "Every decision fully traceable"];
 
-export function AuthScreen() {
+export function AuthScreen({ onOpenDemo }: { onOpenDemo: () => void }) {
   const { login } = useAuth();
   const [showLogin, setShowLogin] = useState(false);
   const [username, setUsername] = useState("admin");
@@ -32,7 +32,7 @@ export function AuthScreen() {
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setShowLogin(true)} className="hidden px-4 py-2 text-sm text-white/70 hover:text-white sm:block">Sign in</button>
-          <Button onClick={() => setShowLogin(true)} className="bg-[#d8ff5f] text-[#07110f] shadow-none hover:bg-[#e5ff93] dark:bg-[#d8ff5f] dark:text-[#07110f]">Open control tower <ArrowRight className="h-4 w-4" /></Button>
+          <Button onClick={onOpenDemo} className="bg-[#d8ff5f] text-[#07110f] shadow-none hover:bg-[#e5ff93] dark:bg-[#d8ff5f] dark:text-[#07110f]">Process demo data <Play className="h-4 w-4" /></Button>
           <Menu className="h-5 w-5 text-white/60 md:hidden" />
         </div>
       </nav>
@@ -44,8 +44,8 @@ export function AuthScreen() {
           <h1 className="mt-7 text-5xl font-semibold leading-[1.02] tracking-[-0.05em] sm:text-6xl lg:text-[74px]">Every freight bill.<br /><span className="text-[#d8ff5f]">Under control.</span></h1>
           <p className="mt-6 max-w-xl text-lg leading-8 text-white/58">Audit carrier invoices against contracts, shipment evidence and bills of lading in minutes. Your team reviews only the exceptions that need judgment.</p>
           <div className="mt-9 flex flex-wrap gap-3">
-            <Button onClick={() => setShowLogin(true)} className="h-12 bg-[#d8ff5f] px-6 text-[#07110f] shadow-[0_16px_50px_rgba(216,255,95,.12)] hover:bg-[#e5ff93] dark:bg-[#d8ff5f] dark:text-[#07110f]">Explore live workspace <ArrowRight className="h-4 w-4" /></Button>
-            <a href="#workflow" className="inline-flex h-12 items-center rounded-lg border border-white/15 px-6 text-sm font-medium text-white/80 transition hover:bg-white/10">See how it works</a>
+            <Button onClick={onOpenDemo} className="h-12 bg-[#d8ff5f] px-6 text-[#07110f] shadow-[0_16px_50px_rgba(216,255,95,.12)] hover:bg-[#e5ff93] dark:bg-[#d8ff5f] dark:text-[#07110f]">Process demo data <Play className="h-4 w-4" /></Button>
+            <button onClick={() => setShowLogin(true)} className="inline-flex h-12 items-center rounded-lg border border-white/15 px-6 text-sm font-medium text-white/80 transition hover:bg-white/10">Open live workspace</button>
           </div>
           <div className="mt-9 flex flex-wrap gap-x-6 gap-y-3">
             {proof.map((item) => <span key={item} className="flex items-center gap-2 text-xs text-white/45"><Check className="h-3.5 w-3.5 text-emerald-400" /> {item}</span>)}
@@ -88,7 +88,7 @@ export function AuthScreen() {
 
       <section id="workflow" className="bg-white px-6 py-24 text-slate-950 lg:px-8"><div className="mx-auto max-w-7xl"><div className="grid gap-12 lg:grid-cols-[.7fr_1.3fr]"><div><p className="text-xs font-bold uppercase tracking-[0.22em] text-emerald-700">Workflow</p><h2 className="mt-4 text-4xl font-semibold tracking-[-0.04em]">A calm queue, even on busy days.</h2><p className="mt-4 leading-7 text-slate-500">The worker fleet handles volume in the background. Reviewers enter only when confidence or policy demands it.</p></div><div className="grid gap-3">{[['01','Ingest','API validates, de-duplicates and queues the bill.'],['02','Investigate','The agent joins contract, shipment and delivery evidence.'],['03','Decide','Exact rules score the bill; AI resolves bounded ambiguity.'],['04','Review','Exceptions pause durably until an authorized human responds.']].map(([number,title,text]) => <div key={number} className="grid grid-cols-[52px_1fr] gap-4 rounded-2xl border border-slate-200 p-5"><span className="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 text-xs font-bold text-emerald-800">{number}</span><div><h3 className="font-semibold">{title}</h3><p className="mt-1 text-sm text-slate-500">{text}</p></div></div>)}</div></div></div></section>
 
-      <section id="security" className="border-t border-white/10 px-6 py-20 lg:px-8"><div className="mx-auto flex max-w-7xl flex-col items-start justify-between gap-8 md:flex-row md:items-center"><div><p className="text-sm font-semibold text-[#d8ff5f]">Ready to inspect the workflow?</p><h2 className="mt-3 max-w-2xl text-3xl font-semibold tracking-tight">Open the seeded workspace and follow a bill from intake to audit trail.</h2></div><Button onClick={() => setShowLogin(true)} className="h-12 bg-white px-6 text-[#07110f] shadow-none hover:bg-white/90 dark:bg-white dark:text-[#07110f]">Enter demo workspace <ArrowRight className="h-4 w-4" /></Button></div></section>
+      <section id="security" className="border-t border-white/10 px-6 py-20 lg:px-8"><div className="mx-auto flex max-w-7xl flex-col items-start justify-between gap-8 md:flex-row md:items-center"><div><p className="text-sm font-semibold text-[#d8ff5f]">Ready to inspect the workflow?</p><h2 className="mt-3 max-w-2xl text-3xl font-semibold tracking-tight">Process a synthetic bill from API input through graph evidence to final output—entirely in your browser.</h2></div><Button onClick={onOpenDemo} className="h-12 bg-white px-6 text-[#07110f] shadow-none hover:bg-white/90 dark:bg-white dark:text-[#07110f]">Process demo data <Play className="h-4 w-4" /></Button></div></section>
 
       <footer className="border-t border-white/10 px-6 py-8 text-xs text-white/35 lg:px-8"><div className="mx-auto flex max-w-7xl flex-col justify-between gap-3 sm:flex-row"><span>© 2026 FreightFlow AI</span><span>Auditable automation for freight finance</span></div></footer>
 

@@ -1,4 +1,4 @@
-import { Activity, BarChart3, Bell, Building2, ChevronDown, CircleHelp, ClipboardCheck, FileText, LogOut, Moon, Search, ShieldCheck, Sparkles, Sun, Truck } from "lucide-react";
+import { Activity, BarChart3, Bell, Building2, ChevronDown, CircleHelp, ClipboardCheck, FileText, FlaskConical, LogOut, Moon, Search, ShieldCheck, Sparkles, Sun, Truck } from "lucide-react";
 import type { ReactNode } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
@@ -13,6 +13,7 @@ type AppLayoutProps = {
 
 const navItems = [
   { id: "overview", label: "Overview", icon: BarChart3 },
+  { id: "demo", label: "Interactive demo", icon: FlaskConical, badge: "Static" },
   { id: "bills", label: "Freight bills", icon: FileText },
   { id: "reviews", label: "Review queue", icon: ClipboardCheck, badge: "Live" },
   { id: "analytics", label: "Analytics", icon: Activity },
