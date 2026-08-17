@@ -17,38 +17,6 @@ The repository contains a React operations UI, FastAPI API, Celery worker fleet,
 - Present the processing architecture through a backend-free, browser-local interactive demonstration.
 - Exercise 120 synthetic bills across clean, ambiguity, boundary, and failure scenarios.
 
-## Quick start
-
-### Run the frontend-only showcase
-
-The public demonstration needs only Node.js 20 or newer. It does not call a backend, database, graph service, queue, or paid model:
-
-```bash
-cd frontend
-npm ci
-npm run dev
-```
-
-Open <http://localhost:5173/#demo> and choose **Process demo data**. The page processes an editable 10-bill JSON portfolio through simulated API intake, queue handoff, GraphDB/Cypher traversal, deterministic controls, bounded model reasoning, decision routing, and final outputs. It then shows the aggregate outcome and lets viewers inspect every bill's complete trace.
-
-The default browser fixture is maintained separately at [`frontend/demo/demo-bills.json`](frontend/demo/demo-bills.json), so scenarios can be expanded without editing the processing engine.
-
-Build the static artifact for free-tier hosting:
-
-```bash
-cd frontend
-npm run build
-npm run preview
-```
-
-Open <http://localhost:4173/#demo>, or publish `frontend/dist/` on any static host and link to `/#demo`. The simulated calls are visibly labelled; authenticated operations pages still require the complete backend. See [Frontend-only product demonstration](docs/frontend-only-demo.md) for its trust boundary, scenarios, and deployment notes.
-
-### Complete-stack requirements
-
-- Docker Engine with the Compose plugin.
-- At least 4 GB free memory; 6 GB is more comfortable for builds plus Neo4j.
-- Ports `3000`, `8000`, and `7474` available.
-
 ### Start the complete stack
 
 ```bash
@@ -383,6 +351,8 @@ docker compose logs -f api worker
 
 Clients may supply `X-Correlation-ID`; otherwise the API creates and returns one. The same ID is persisted and propagated to Celery.
 
+Runtime log files are local artifacts. The repository ignores both `logs/` and `*.log`; never force-add a generated log file. Use container stdout or an external log service for shared environments.
+
 ## Stop, reset, and troubleshoot
 
 ```bash
@@ -437,7 +407,3 @@ docker-compose.yml       Complete local topology
 - [Frequently asked questions](docs/faq.md)
 - [Frontend-only product demonstration](docs/frontend-only-demo.md)
 - [Demo scenario catalogue](docs/demo-scenarios.md)
-
-## Production boundary
-
-Before an internet-facing deployment, complete the Priority 0 work in the [improvement roadmap](docs/improvements.md): external identity, RBAC, immutable reviewer identity, restricted CORS/TLS/rate limiting, strict finance input validation, row-level tenant protection, transactional outbox, and idempotent worker leases. Use managed data services, secret management, backups, centralized telemetry, and a release migration job.
