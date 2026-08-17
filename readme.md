@@ -1,410 +1,417 @@
-# Freight Bill Processor
+# FreightFlow AI
 
-A stateful LangGraph agent that automatically validates carrier freight bills against contracts, shipments, and bills of lading — with human-in-the-loop review for low-confidence cases.
+FreightFlow AI is a multi-tenant freight-bill audit control tower. It validates carrier invoices against contracts, shipments, and bills of lading; uses bounded AI only for ambiguous context; and durably pauses uncertain cases for accountable human review.
 
-Check it out at: https://finance-agent-889865964505.europe-west1.run.app/docs
+The repository contains a React operations UI, FastAPI API, Celery worker fleet, Redis queue, PostgreSQL business state and LangGraph checkpoints, Neo4j evidence traversal, Alembic migrations, structured JSON logging, and a comprehensive synthetic demo.
 
----
+## Product capabilities
 
-## Quick Start
+- Ingest one bill or a bulk JSON array with optional idempotency keys.
+- Check duplicates, carrier identity, contract dates, minimum weight, rates, base charges, fuel surcharges, BOL weight, UOM, and invoice totals.
+- Traverse carrier, contract, lane, shipment, BOL, and prior-bill relationships.
+- Resolve fuzzy carrier names and overlapping contracts through a constrained model path with deterministic fallbacks.
+- Auto-approve clean bills, dispute/reject hard failures, and checkpoint review cases.
+- Resume the exact paused workflow after API or worker restarts.
+- Inspect evidence, explanations, audit history, review state, metrics, and correlation-aware logs.
+- Operate tenant company and audit-partner profiles through the UI.
+- Exercise 120 synthetic bills across clean, ambiguity, boundary, and failure scenarios.
 
-### Option A — Docker (recommended)
+## Quick start
+
+### Requirements
+
+- Docker Engine with the Compose plugin.
+- At least 4 GB free memory; 6 GB is more comfortable for builds plus Neo4j.
+- Ports `3000`, `8000`, and `7474` available.
+
+### Start the complete stack
 
 ```bash
-# 1. Clone / unzip the project
-cd finance_agent
-
-# 2. Add your LLM key
 cp .env.example .env
-# edit .env — set ANTHROPIC_API_KEY or OPENAI_API_KEY
-# Docker also starts Neo4j for graph traversal.
 
-# 3. Start everything
-docker-compose up --build
+# Optional: add one key to exercise model-assisted carrier normalization.
+# OPENAI_API_KEY=...
+# or ANTHROPIC_API_KEY=...
 
-# 4. The API is now at http://localhost:8000
-# Seed data is auto-loaded on container startup
+docker compose up --build -d
+docker compose ps
 ```
 
-### Option B — Local (no Docker)
+The first start builds both application images, applies every Alembic migration, initializes LangGraph checkpoint tables, loads reference seed data, and starts the API, worker, frontend, PostgreSQL, Redis, and Neo4j.
 
-```bash
-# Prerequisites: Python 3.12+, Postgres running locally
+Open:
 
-python -m venv .venv
-# Linux/macOS
-source .venv/bin/activate
-# Windows PowerShell
-# .\.venv\Scripts\Activate.ps1
+| Surface | URL |
+|---|---|
+| Product UI | <http://localhost:3000> |
+| OpenAPI/Swagger | <http://localhost:8000/docs> |
+| API health | <http://localhost:8000/health> |
+| Neo4j Browser | <http://localhost:7474> |
 
-pip install -r requirements.txt
+### Choose a workspace
 
-# Create env file
-cp .env.example .env
-# Windows PowerShell:
-# Copy-Item .env.example .env
-# then edit .env and set one LLM key:
-#   ANTHROPIC_API_KEY=...
-#   or OPENAI_API_KEY=...
-# Optional resilience and scale toggles:
-#   LLM_CIRCUIT_BREAKER_COOLDOWN_SECONDS=60
-#   MAX_CONCURRENT_AGENT_RUNS=8
-#   BULK_INGEST_BATCH_SIZE=250
-#   GRAPH_BACKEND=memory  # local fallback if Neo4j is not running
+Local administrator:
 
-# Load seed data
-python -m app.seed_loader
-
-# Run API
-uvicorn app.main:app --reload --port 8000
-
-# Logs are printed to terminal and written to:
-#   logs/app.log (with rotation)
+```text
+Tenant:   default
+Username: admin
+Password: admin
 ```
 
-### Run Tests
+Isolated demo workspace:
 
-```bash
-python -m pytest app/tests/ -v
+```text
+Tenant:   demo
+Username: demo
+Password: demo
 ```
 
-### React Dashboard
+The demo credentials are rejected outside tenant `demo`. The bootstrap administrator is intended only for controlled local development.
+
+Verify a session from the command line:
 
 ```bash
-cd frontend
-npm install
-npm run dev
+curl -u demo:demo \
+  -H 'X-Tenant-ID: demo' \
+  http://localhost:8000/session
 ```
 
-Open `http://localhost:5173`. The Vite dev server proxies `/api` to `http://localhost:8000`.
-Use the bootstrap credentials `admin` / `admin` while database-backed users are being implemented.
+## Run the comprehensive demo
 
-### Resilience Tests (bulk + quota protection)
+Sign in to tenant `demo`, choose **Use demo data** on the overview, and wait for workers to drain the queue.
+
+CLI equivalent:
 
 ```bash
-python -m pytest app/tests/test_resilience.py -v
+curl -u demo:demo -X POST \
+  -H 'X-Tenant-ID: demo' \
+  -H 'X-Correlation-ID: demo-run-001' \
+  http://localhost:8000/admin/demo/load
+
+docker compose logs -f worker
 ```
 
-### Run Smoke Test
+The 120-bill portfolio contains:
 
-With API running locally:
+| Cohort | Count | Coverage |
+|---|---:|---|
+| Deterministic baseline | 60 | Clean single-contract bills with complete evidence |
+| AI-assisted ambiguity | 40 | 20 known-carrier contract overlaps and 20 fuzzy-carrier plus contract-overlap cases |
+| Edge/control cases | 20 | Duplicate, rate, weight, total, surcharge, contract, missing evidence, UOM, minimum charge, and multi-BOL behavior |
+
+Every bill records its demo scenario and expected behavior in `evidence`. The load response also returns cohort ID lists and a scenario catalogue. Without a model key, exact checks still run, overlapping contracts use the closest-rate fallback, and fuzzy carrier names may become unknown-carrier disputes.
+
+See [Demo scenario catalogue](docs/demo-scenarios.md) for the complete matrix.
+
+Check progress:
 
 ```bash
-python scripts/smoke_test.py
+curl -u demo:demo \
+  -H 'X-Tenant-ID: demo' \
+  http://localhost:8000/metrics
 ```
 
-If your API runs on a different host/port:
+Demo loading returns `202`; final distributions are meaningful after `pending` and `processing` are zero.
+
+Remove only synthetic records:
 
 ```bash
-python scripts/smoke_test.py http://127.0.0.1:8000
+curl -u demo:demo -X DELETE \
+  -H 'X-Tenant-ID: demo' \
+  http://localhost:8000/admin/demo
 ```
 
-### Demo and Admin Data
+## How the system works
 
-With the API running, open Swagger UI at `http://localhost:8000/docs` and use the **Admin** endpoints:
-
-- `POST /admin/demo/load`: creates 20 demo freight bills with demo carriers, contracts, shipments, and BOLs, then queues all bills for agent processing. The first 10 are deterministic; the last 10 omit `carrier_id` and use overlapping contracts so LLM carrier normalization and ambiguity-resolution logs are exercised.
-- `DELETE /admin/demo`: deletes only records with demo prefixes (`DEMO-*`, `CAR-DEMO*`) and rebuilds the in-memory graph.
-- `DELETE /admin/data?confirm=DELETE_ALL`: deletes all carriers, contracts, shipments, BOLs, freight bills, and audit logs while keeping the schema intact.
-
-CLI alternative:
-
-```bash
-python scripts/demo_data.py load
-python scripts/demo_data.py clear
+```mermaid
+flowchart LR
+    UI[React + Nginx] -->|authenticated API| API[FastAPI]
+    API -->|business state| PG[(PostgreSQL)]
+    API -->|enqueue| REDIS[(Redis)]
+    REDIS --> WORKER[Celery worker]
+    WORKER -->|durable checkpoints and results| PG
+    WORKER -->|evidence traversal| NEO[(Neo4j)]
+    WORKER -. bounded ambiguity .-> LLM[OpenAI or Anthropic]
 ```
 
----
+1. The API authenticates the caller, resolves the tenant, validates input, checks idempotency/duplicates, commits the bill, and enqueues work.
+2. A worker creates a unique durable LangGraph thread and projects the bill into the graph.
+3. The agent loads carrier, contract, shipment, BOL, prior-bill, and graph-anomaly context.
+4. Deterministic Python rules evaluate exact facts. Hard blockers skip model calls.
+5. A model may normalize a missing carrier ID or choose among allowed overlapping contracts. Unavailable or invalid output has a deterministic fallback.
+6. Confidence and policy produce `auto_approve`, `flag`, `dispute`, or `reject`.
+7. `flag` interrupts and checkpoints in PostgreSQL. A reviewer later resumes the same thread.
+8. Final status, explanation, findings, evidence, and audit events are committed to PostgreSQL.
 
-## Deploy on GCP (Cloud Run + Secret Manager)
+Read the [high-level design](docs/high-level-design.md), [low-level design](docs/low-level-design.md), and [functional and technical flows](docs/flows.md) for diagrams and invariants.
 
-You do not need a `.env` file in production. Use Secret Manager and inject secrets as environment variables at deploy time.
+## Decision policy
 
-```bash
-# 0) Set your values
-export PROJECT_ID="your-gcp-project-id"
-export REGION="us-central1"
-export REPO="freight-api"
-export IMAGE="freight-bill-processor"
-export SERVICE="freight-bill-processor"
+The confidence score starts at `1.0`, subtracts `0.25` per unique error and `0.08` per unique warning, and subtracts `0.15` for genuine contract ambiguity.
 
-# 1) Enable required APIs
-gcloud services enable run.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com --project $PROJECT_ID
+| Default condition | Decision | Action |
+|---|---|---|
+| Duplicate finding | `reject` | Finalize |
+| Confidence `>= 0.85` and no errors | `auto_approve` | Finalize |
+| Confidence `<= 0.40` or hard carrier/weight error | `dispute` | Finalize |
+| Remaining cases | `flag` | Durable human review |
 
-# 2) Artifact Registry (one-time)
-gcloud artifacts repositories create $REPO --repository-format=docker --location=$REGION --project=$PROJECT_ID
-gcloud auth configure-docker ${REGION}-docker.pkg.dev
+This is an explainable routing heuristic, not a probability model. Production thresholds should be calibrated with labelled reviewer outcomes and false-approval cost.
 
-# 3) Build & push image
-docker build -t ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${IMAGE}:v1 .
-docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${IMAGE}:v1
+## API essentials
 
-# 4) Create/update secrets (examples)
-printf "postgresql+asyncpg://USER:PASS@HOST:5432/DB?ssl=require" | gcloud secrets create DATABASE_URL --data-file=- --project $PROJECT_ID || true
-printf "your-openai-key" | gcloud secrets create OPENAI_API_KEY --data-file=- --project $PROJECT_ID || true
-printf "openai" | gcloud secrets create LLM_PROVIDER --data-file=- --project $PROJECT_ID || true
+Business endpoints use HTTP Basic authentication and `X-Tenant-ID`. The frontend sends the same headers through its `/api` proxy.
 
-# Add new versions if secret already exists
-printf "postgresql+asyncpg://USER:PASS@HOST:5432/DB?ssl=require" | gcloud secrets versions add DATABASE_URL --data-file=- --project $PROJECT_ID
-printf "your-openai-key" | gcloud secrets versions add OPENAI_API_KEY --data-file=- --project $PROJECT_ID
-printf "openai" | gcloud secrets versions add LLM_PROVIDER --data-file=- --project $PROJECT_ID
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/session` | Read authenticated role, tenant, and demo status |
+| `GET` | `/workflows` | List supported workflow definitions |
+| `POST` | `/freight-bills` | Ingest one bill or an array and queue work |
+| `GET` | `/freight-bills` | List tenant bills with limit/offset |
+| `GET` | `/freight-bills/{id}` | Read complete result and evidence |
+| `GET` | `/freight-bills/{id}/audit` | Read ordered audit events |
+| `GET` | `/review-queue` | List interrupted cases |
+| `POST` | `/review/{id}` | Submit `approve`, `dispute`, or `reject` |
+| `GET` | `/metrics` | Read status, decision, and confidence metrics |
+| `GET/PUT` | `/company` | Read or save the tenant company profile |
+| `GET/POST` | `/partner-firms` | Read or upsert audit partners |
+| `POST` | `/admin/rebuild-graph` | Rebuild the selected tenant projection |
+| `POST` | `/admin/demo/load` | Load and queue the 120-bill demo |
+| `DELETE` | `/admin/demo` | Remove only demo-prefixed records |
+| `DELETE` | `/admin/data?confirm=DELETE_ALL` | Remove all selected-tenant application data |
+| `GET` | `/health`, `/health/db`, `/health/graph` | Liveness and dependency probes |
 
-# 5) Deploy Cloud Run service
-gcloud run deploy $SERVICE \
-  --image ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${IMAGE}:v1 \
-  --platform managed \
-  --region $REGION \
-  --allow-unauthenticated \
-  --set-secrets DATABASE_URL=DATABASE_URL:latest,OPENAI_API_KEY=OPENAI_API_KEY:latest,LLM_PROVIDER=LLM_PROVIDER:latest
-```
-
-After deploy, open:
-- `https://<cloud-run-url>/docs` for Swagger UI
-- `https://<cloud-run-url>/health` for liveness
-
-
-## API Reference
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/freight-bills` | Ingest a freight bill, triggers agent (async) |
-| GET | `/freight-bills` | List all bills |
-| GET | `/freight-bills/{id}` | Get bill state, decision, evidence |
-| GET | `/freight-bills/{id}/audit` | Full audit trail for a bill |
-| GET | `/review-queue` | Bills waiting for human review |
-| POST | `/review/{id}` | Submit reviewer decision, resume agent |
-| GET | `/metrics` | Agent performance summary |
-| GET | `/workflows` | List supported invoice workflows |
-| GET | `/health` | Liveness check |
-| GET | `/health/db` | DB connectivity check (`SELECT 1`) |
-| GET | `/health/graph` | Graph backend health check |
-| POST | `/admin/demo/load` | Load and process demo data |
-| DELETE | `/admin/demo` | Remove demo data |
-| DELETE | `/admin/data?confirm=DELETE_ALL` | Remove all application data |
-
-### Example: Ingest a bill
+### Ingest a bill
 
 ```bash
-curl -X POST http://localhost:8000/freight-bills \
-  -H "Content-Type: application/json" \
-  -H "X-Tenant-ID: default" \
+curl -u admin:admin -X POST http://localhost:8000/freight-bills \
+  -H 'Content-Type: application/json' \
+  -H 'X-Tenant-ID: default' \
+  -H 'X-Correlation-ID: import-2026-08-17-001' \
   -d '{
-    "id": "FB-2025-101",
-    "workflow_type": "freight_audit",
-    "idempotency_key": "client-request-2025-101",
+    "idempotency_key": "erp-freight-2026-00821",
     "carrier_id": "CAR001",
     "carrier_name": "Safexpress Logistics",
-    "bill_number": "SFX/2025/00234",
-    "bill_date": "2025-02-15",
+    "bill_number": "SFX/2026/00821",
+    "bill_date": "2026-08-17",
     "shipment_reference": "SHP-2025-002",
     "lane": "DEL-BLR",
     "billed_weight_kg": 850,
-    "rate_per_kg": 15.00,
-    "base_charge": 12750.00,
-    "fuel_surcharge": 1020.00,
-    "gst_amount": 2479.00,
-    "total_amount": 16249.00
+    "rate_per_kg": 15,
+    "billing_unit": "kg",
+    "base_charge": 12750,
+    "fuel_surcharge": 1020,
+    "gst_amount": 2479,
+    "total_amount": 16249
   }'
 ```
 
-### Example: Bulk ingest (array payload)
+The response is `202 Accepted`. Keep the returned `X-Correlation-ID` to trace the bill across API and worker logs.
 
-Use a JSON array (`[...]`), not comma-separated standalone objects:
-
-For production clients, include `idempotency_key` per item so retries do not
-create duplicate workflow runs.
+### Submit a review
 
 ```bash
-curl -X POST http://localhost:8000/freight-bills \
-  -H "Content-Type: application/json" \
-  -H "X-Tenant-ID: default" \
-  -d '[
-    {
-      "id": "FB-2025-101",
-      "carrier_id": "CAR001",
-      "carrier_name": "Safexpress Logistics",
-      "bill_number": "SFX/2025/00234",
-      "bill_date": "2025-02-15",
-      "shipment_reference": "SHP-2025-002",
-      "lane": "DEL-BLR",
-      "billed_weight_kg": 850,
-      "rate_per_kg": 15.00,
-      "base_charge": 12750.00,
-      "fuel_surcharge": 1020.00,
-      "gst_amount": 2479.00,
-      "total_amount": 16249.00
-    },
-    {
-      "id": "FB-2025-109",
-      "carrier_id": "CAR001",
-      "carrier_name": "Safexpress Logistics",
-      "bill_number": "SFX/2025/00234",
-      "bill_date": "2025-02-15",
-      "shipment_reference": "SHP-2025-002",
-      "lane": "DEL-BLR",
-      "billed_weight_kg": 850,
-      "rate_per_kg": 15.00,
-      "base_charge": 12750.00,
-      "fuel_surcharge": 1020.00,
-      "gst_amount": 2479.00,
-      "total_amount": 16249.00
-    }
-  ]'
+curl -u admin:admin -X POST \
+  -H 'Content-Type: application/json' \
+  -H 'X-Tenant-ID: default' \
+  http://localhost:8000/review/FB-EXAMPLE \
+  -d '{
+    "reviewer_decision": "approve",
+    "reviewer_notes": "Contract and delivery evidence verified."
+  }'
 ```
 
-### Example: Submit a review
+The bill must currently be `awaiting_review` and have a persisted LangGraph thread.
+
+## Configuration
+
+Copy `.env.example` to `.env`. Compose overrides internal service addresses, so local container DNS remains correct even when host defaults differ.
+
+| Variable | Default or example | Purpose |
+|---|---|---|
+| `DATABASE_URL` | local PostgreSQL DSN fallback | Application and checkpoint database |
+| `CELERY_BROKER_URL` | `redis://localhost:6379/0` | Celery broker |
+| `CELERY_RESULT_BACKEND` | `redis://localhost:6379/1` | Short-lived task results |
+| `CELERY_CONCURRENCY` | `4` in Compose command | Worker child count |
+| `CHECKPOINT_POOL_SIZE` | `5` | Per-worker-process checkpoint pool cap |
+| `DEFAULT_TENANT_ID` | `default` | Fallback tenant when header is absent |
+| `ADMIN_USERNAME/PASSWORD` | `admin/admin` | Local bootstrap identity |
+| `DEMO_TENANT_ID/USERNAME/PASSWORD` | `demo/demo/demo` | Tenant-restricted demo identity |
+| `GRAPH_BACKEND` | `neo4j` | `neo4j` or test/local `memory` |
+| `NEO4J_URI/USER/PASSWORD/DATABASE` | environment-specific | Graph connection |
+| `LLM_PROVIDER` | `openai` in `.env.example` | Preferred `openai` or `anthropic` client |
+| `LLM_OPENAI_MODEL` | `gpt-4o-mini` | OpenAI model name |
+| `LLM_ANTHROPIC_MODEL` | `claude-3-5-haiku-latest` | Anthropic model name |
+| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | empty | Optional model credentials |
+| `LLM_DEBUG_PAYLOADS` | `false` | Logs prompts/responses; avoid with sensitive data |
+| `AUTO_APPROVE_THRESHOLD` | `0.85` | Direct approval boundary |
+| `DISPUTE_THRESHOLD` | `0.40` | Low-confidence dispute boundary |
+
+See `.env.example` for logging, circuit-breaker, graph-pool, and other settings.
+
+## Migrations and durable state
+
+Application schema changes are owned only by Alembic:
 
 ```bash
-curl -X POST http://localhost:8000/review/FB-2025-102 \
-  -H "Content-Type: application/json" \
-  -d '{"reviewer_decision": "approve", "reviewer_notes": "Verified — CC-2025-SFX-003 applies"}'
+docker compose run --rm migrate alembic current
+docker compose run --rm migrate alembic upgrade head
 ```
 
----
+The migration chain includes the core baseline, tenant/workflow columns, idempotency, company/partner/auth models, and worker observability columns.
 
-## Schema Design
+LangGraph separately owns `checkpoints`, `checkpoint_blobs`, `checkpoint_writes`, and `checkpoint_migrations` through `AsyncPostgresSaver.setup()`. The one-shot `migrate` service initializes them before prefork workers start. Runtime `Base.metadata.create_all()` is intentionally not used.
 
-### Relational (Postgres)
+## Development workflow
 
-| Table | Purpose |
-|-------|---------|
-| `carriers` | Master carrier registry |
-| `carrier_contracts` | Contracts with rate cards stored as JSONB |
-| `shipments` | Individual shipments with status |
-| `bills_of_lading` | Delivery confirmations per shipment |
-| `freight_bills` | Incoming bills with processing state, evidence JSONB |
-| `audit_logs` | Append-only event log per bill |
+### Recommended: all services in Docker
 
-**Why rate cards in JSONB?** Rate cards are heterogeneous — some are per-kg, some are FTL with alternate rates, some have mid-term revisions. A normalized `rate_card_rows` table would require nullable columns for every combination. JSONB keeps the structure flexible and queryable enough for our access patterns (always read the whole rate card for a contract).
+Use the quick-start stack and rebuild only changed services:
 
-**Why `evidence` as JSONB on FreightBill?** The evidence chain is a structured blob that travels with the bill and is always read whole. No need to normalize it.
-
-### Graph (Neo4j production backend)
-
-```
-Carrier --HAS_CONTRACT--> Contract --COVERS_LANE--> Lane
-   │                          │
-   └--HAS_SHIPMENT--> Shipment --HAS_BOL--> BOL
-                          ▲
-                    FreightBill --REFERENCES--┘
+```bash
+docker compose up --build -d api worker frontend
+docker compose logs -f api worker
 ```
 
-Postgres remains the source of truth for workflow state. Neo4j is the production traversal store for carrier, contract, lane, shipment, BOL, and freight bill relationships.
+PostgreSQL and Redis are intentionally not published to host ports by the default Compose file. This reduces accidental exposure.
 
-The app uses a `GraphService` abstraction with two backends:
+### Frontend hot reload
 
-- `Neo4jGraphBackend`: production backend, enabled with `GRAPH_BACKEND=neo4j`.
-- `MemoryGraphBackend`: local/test fallback when Neo4j credentials are not configured.
+Run the backend stack in Docker, then start Vite:
 
-Every graph node includes `tenant_id`, and graph lookups are tenant-scoped.
-
----
-
-## Confidence Scoring
-
-Confidence is computed by `rules.compute_confidence()` from the `ValidationResult`:
-
-```
-score = 1.0
-for each finding:
-    error  → -0.25
-    warn   → -0.08
-score = clamp(score, 0.0, 1.0)
-
-# Additional deduction in agent:
-if multiple contracts matched (ambiguity) → -0.15
+```bash
+cd frontend
+npm ci
+npm run dev
 ```
 
-**Decision thresholds:**
+Open <http://localhost:5173>. Vite proxies `/api` to `http://localhost:8000`.
 
-| Confidence | Decision |
-|-----------|----------|
-| ≥ 0.80 AND no errors | `auto_approve` |
-| ≤ 0.40 OR critical error (duplicate, unknown carrier, weight mismatch) | `dispute` |
-| Everything else | `flag` → human review |
+### Host-run backend
 
-**What goes into the score:**
+Create a Python 3.12 environment:
 
-- Duplicate check (error = -0.25)
-- Carrier known (error = -0.25)
-- Contract active on bill date (error = -0.25)
-- Minimum weight eligibility when a contract rate row specifies `min_weight_kg`
-- Rate within 2% tolerance (error or warn depending on magnitude)
-- Fuel surcharge correct (handles mid-term revisions)
-- Base charge = weight × rate ≥ min_charge
-- Billed weight vs BOL actual (accounts for prior bills on partial shipments)
-- Total internal consistency (base + fsc + gst = total)
-- UOM mismatch (FTL contract vs per-kg billing)
-
----
-
-## Human-in-the-Loop Pattern
-
-The agent uses LangGraph's `interrupt()` for real pause/resume — not a workaround:
-
-```
-decide() → confidence < threshold
-    │
-    ▼
-human_review node calls interrupt({bill_id, confidence, decision})
-    │
-    ░ Agent state serialized to MemorySaver (thread_id stored in DB)
-    ░ POST /review/{id} called by ops team
-    │
-    ▼
-agent.update_state(config, {reviewer_decision: "approve"}, as_node="human_review")
-agent.astream(None, config)   ← resumes from after interrupt()
-    │
-    ▼
-finalize() → writes final state to DB
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-The `thread_id` (stored on `FreightBill.thread_id`) is the key that lets us resume the exact paused graph state. In production you'd replace `MemorySaver` with `AsyncPostgresSaver` so state survives API restarts.
+Provide reachable PostgreSQL, Redis, and Neo4j endpoints, then run:
 
----
+```bash
+alembic upgrade head
+python scripts/checkpoint_setup.py
+python scripts/seed_loader.py
 
-## LLM Usage (Minimal and Intentional)
+uvicorn app.main:app --reload --port 8000
+celery -A app.worker.celery_app:celery_app worker --loglevel=INFO
+```
 
-LLM calls are isolated to `llm_service.py` and used only for:
+Run API and worker in separate terminals. The default Compose databases are internal-only; use an explicit Compose override or external development services if host processes need them.
 
-1. **Fuzzy carrier name matching** — `"Gati KWE Logistics"` has no carrier_id; LLM matches against known carriers. Deterministic rules can't do this.
-2. **Ambiguous contract resolution** — when 3 contracts cover the same lane (FB-2025-102), the LLM picks the best match based on rate and notes. A rule-based tie-break would be arbitrary.
-3. **Human-readable explanations** — converts structured findings into a 2-3 sentence summary for the ops reviewer.
+## Tests and verification
 
-All charge math, date checks, weight validation, and rate comparisons are deterministic rules in `rules.py`. This is the right boundary: LLM for fuzzy reasoning, rules for verifiable arithmetic.
+### Fast local checks
 
----
+```bash
+.venv/bin/pytest -q
 
-## How Each Seed Bill Is Handled
+cd frontend
+npm ci
+npm run build
+```
 
-| Bill | Scenario | Expected Decision |
-|------|----------|-------------------|
-| FB-2025-101 | Clean match | `auto_approve` |
-| FB-2025-102 | 3 overlapping contracts, no shipment ref | `flag` (LLM resolves contract, ambiguity -0.15) |
-| FB-2025-103 | Partial delivery, 800kg of 2000kg | `auto_approve` if weight checks out |
-| FB-2025-104 | Over-billing (1500kg billed, 1200kg delivered) | `dispute` (WEIGHT_MISMATCH error) |
-| FB-2025-105 | Rate drift +8.75% | `flag` (RATE_MISMATCH error) |
-| FB-2025-106 | Expired contract | `dispute` (CONTRACT_EXPIRED error) |
-| FB-2025-107 | FTL vs per-kg UOM | `flag` (UOM handled, but ambiguity remains) |
-| FB-2025-108 | Revised fuel surcharge | `auto_approve` (revision logic handles it) |
-| FB-2025-109 | Duplicate of FB-2025-101 | `dispute` (DUPLICATE_BILL error) |
-| FB-2025-110 | Unknown carrier (Gati KWE) | `dispute` after LLM fuzzy match fails |
+Integration tests skip unless `TEST_DATABASE_URL` points to a migrated PostgreSQL database:
 
----
+```bash
+TEST_DATABASE_URL='postgresql+asyncpg://USER:PASS@HOST:5432/TEST_DB' \
+  .venv/bin/pytest -m integration -q
+```
 
-## Trade-offs and What I'd Do Differently
+Use a dedicated test database. The suite creates tenant-scoped records and checkpoint tables and cleans its bill/audit rows.
 
-**Trade-offs made deliberately:**
+Additional release checks:
 
-- **MemorySaver over PostgresSaver**: State is lost on restart. Fine for a 48h assignment, but in production you'd use `langgraph-checkpoint-postgres`. The swap is one line.
-- **Background tasks over Celery/RQ**: FastAPI's `BackgroundTasks` is simple and works for the demo. At volume you'd want a proper task queue so agent runs survive API pod restarts.
-- **Neo4j over NetworkX**: Neo4j is now the production graph backend. The in-process memory backend remains only as a local/test fallback.
-- **All disputed/flagged bills go to human review**: A production system might auto-reject clear duplicates without human review. I chose conservative behaviour — ops teams prefer to see everything initially.
+```bash
+alembic check
+docker compose config --quiet
+git diff --check
+```
 
-**With more time:**
-- Replace `MemorySaver` with `AsyncPostgresSaver` for durable state
-- Expand Alembic migrations and remove startup `create_all` once deployments rely fully on migrations
-- Add a Celery worker for agent execution (decouple from API process)
-- More test coverage: integration tests with a real DB using `pytest-asyncio`
-- GCP deployment: Cloud Run (API) + Cloud SQL (Postgres) + Secret Manager
-- Structured logging with correlation IDs per freight bill
+The integration suite verifies migrated worker columns, service persistence, audit results, and a real `AsyncPostgresSaver` checkpoint round trip.
+
+## Observability
+
+API and worker events are JSON on stdout and in the rotating `logs/app.log` file. Useful fields include:
+
+- `correlation_id`
+- `freight_bill_id`
+- `tenant_id`
+- `celery_task_id`
+- `http_method` and `http_path`
+- `logger`, `level`, and `timestamp`
+
+```bash
+docker compose logs -f api worker
+```
+
+Clients may supply `X-Correlation-ID`; otherwise the API creates and returns one. The same ID is persisted and propagated to Celery.
+
+## Stop, reset, and troubleshoot
+
+```bash
+# Stop containers and retain data volumes
+docker compose down
+
+# Inspect recent service logs
+docker compose logs --tail=200 api worker migrate postgres redis neo4j frontend
+
+# Remove containers and all Compose-managed product data
+docker compose down -v
+```
+
+`down -v` permanently removes the local PostgreSQL, Redis, and Neo4j volumes. Use `DELETE /admin/demo` when only synthetic records should be cleared.
+
+Common checks:
+
+- API cannot start: inspect `migrate` and PostgreSQL health first.
+- Worker remains unhealthy: inspect Redis connectivity and Celery worker name/ping output.
+- Graph health fails: verify `NEO4J_PASSWORD` is identical for the app and Neo4j service.
+- Model paths fall back: verify provider selection, key, quota, and circuit-breaker logs.
+- UI API errors after restart: rebuild/restart frontend only if Nginx configuration changed; its upstream dynamically re-resolves Docker DNS.
+
+## Repository map
+
+```text
+app/api/                 FastAPI routes
+app/agent/               LangGraph nodes, exact rules, LLM adapter, checkpoints
+app/services/            Persistence, graph, demo, and admin services
+app/worker/              Celery application and task boundary
+app/models/              SQLAlchemy models
+app/tests/               Unit and PostgreSQL integration tests
+frontend/src/            React operations UI
+migrations/versions/     Ordered Alembic schema history
+scripts/                 Seed and checkpoint setup commands
+docs/                    Product, design, flows, decisions, edge cases, FAQ
+seed_data.json           Baseline reference and example records
+docker-compose.yml       Complete local topology
+```
+
+## Documentation
+
+- [Documentation index](docs/README.md)
+- [Project overview](docs/project-overview.md)
+- [High-level design](docs/high-level-design.md)
+- [Low-level design](docs/low-level-design.md)
+- [Functional and technical flows](docs/flows.md)
+- [Important code paths](docs/code-guide.md)
+- [Architecture decisions and alternatives](docs/architecture-decisions.md)
+- [Edge cases and failure handling](docs/edge-cases.md)
+- [Improvement and scaling roadmap](docs/improvements.md)
+- [Frequently asked questions](docs/faq.md)
+- [Demo scenario catalogue](docs/demo-scenarios.md)
+
+## Production boundary
+
+Before an internet-facing deployment, complete the Priority 0 work in the [improvement roadmap](docs/improvements.md): external identity, RBAC, immutable reviewer identity, restricted CORS/TLS/rate limiting, strict finance input validation, row-level tenant protection, transactional outbox, and idempotent worker leases. Use managed data services, secret management, backups, centralized telemetry, and a release migration job.
