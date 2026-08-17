@@ -29,7 +29,9 @@ npm ci
 npm run dev
 ```
 
-Open <http://localhost:5173/#demo> and choose **Process demo data**. The page follows an editable invoice through simulated API intake, queue handoff, a visualized Cypher/graph exchange, deterministic controls, optional bounded model reasoning, decision routing, and final JSON output.
+Open <http://localhost:5173/#demo> and choose **Process demo data**. The page processes an editable 10-bill JSON portfolio through simulated API intake, queue handoff, GraphDB/Cypher traversal, deterministic controls, bounded model reasoning, decision routing, and final outputs. It then shows the aggregate outcome and lets viewers inspect every bill's complete trace.
+
+The default browser fixture is maintained separately at [`frontend/demo/demo-bills.json`](frontend/demo/demo-bills.json), so scenarios can be expanded without editing the processing engine.
 
 Build the static artifact for free-tier hosting:
 

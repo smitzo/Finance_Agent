@@ -35,6 +35,7 @@ This file is the compact context cache for the current productization pass. Upda
 - Graph rate outliers compare against the highest applicable overlapping-contract rate; comparing against the cheapest rate falsely flags valid premium contracts.
 - A submitted carrier ID is considered known only after it resolves to carrier reference data.
 - The public demo uses a hash route and browser-local synthetic processing so static hosts need no rewrite rule or runtime service; every simulated API, graph, and model exchange remains labelled.
+- The public demo processes a default 10-bill portfolio from `frontend/demo/demo-bills.json`, reports aggregate outcomes, and retains a per-bill evidence and service-exchange drill-down.
 
 ## Baseline evidence
 
@@ -59,6 +60,7 @@ This file is the compact context cache for the current productization pass. Upda
 - [x] Monolithic understanding guide split into focused public documentation
 - [x] Comprehensive tenant-safe 120-bill demo scenario matrix
 - [x] Frontend-only interactive processing and evidence-graph demonstration
+- [x] Ten-bill frontend batch demonstration with standalone JSON fixture and per-result trace selection
 - [x] Final backend, migration, worker, and frontend validation
 
 ## Validation log
@@ -82,6 +84,7 @@ Append concise results here as checks run.
 - 2026-08-17: live tenant-scoped demo -> 120/120 bills reached persisted outcomes: 87 approved, 23 disputed, 9 awaiting review, 1 rejected. Cleanup removed only the 120 synthetic bills and related demo records; final demo tenant bill count was zero.
 - 2026-08-17: live demo validation exposed and fixed cross-tenant demo primary-key collisions, unresolved carrier IDs being treated as known, and false graph rate outliers on valid premium contracts.
 - 2026-08-17: frontend-only demo -> production build transformed 1,605 modules; a headless-browser click flow reached the completed timeline, evidence graph, Cypher request, decision, and final output. Backend tests remained 49 passed and 3 skipped; Compose configuration and `git diff --check` passed.
+- 2026-08-17: frontend batch demo -> standalone JSON fixture loaded 10 bills across six control paths; the browser click flow rendered exactly 10 result rows with aggregate outcomes and per-bill trace selection. Production build transformed 1,606 modules, backend tests remained 49 passed and 3 skipped, and `git diff --check` passed.
 
 ## Known follow-ups
 

@@ -1,4 +1,9 @@
+import demoBatchData from "../../demo/demo-bills.json";
+
+export type DemoScenarioId = "clean" | "contract" | "weight" | "duplicate" | "total" | "carrier";
+
 export type DemoBillInput = {
+  demo_scenario?: DemoScenarioId;
   id: string;
   carrier_id?: string;
   carrier_name: string;
@@ -31,8 +36,6 @@ type DemoReference = {
   bols: Array<{ id: string; actual_weight_kg: number }>;
   duplicate_bill_ids: string[];
 };
-
-export type DemoScenarioId = "clean" | "contract" | "weight" | "duplicate" | "total" | "carrier";
 
 export type DemoScenario = {
   id: DemoScenarioId;
@@ -189,6 +192,8 @@ export const demoScenarios: DemoScenario[] = [
     reference: { carrier: null, contracts: [], shipment: null, bols: [], duplicate_bill_ids: [] },
   },
 ];
+
+export const demoBatchBills = demoBatchData as DemoBillInput[];
 
 function closeEnough(actual: number, expected: number) {
   if (expected === 0) return actual === 0;
