@@ -14,11 +14,34 @@ The repository contains a React operations UI, FastAPI API, Celery worker fleet,
 - Resume the exact paused workflow after API or worker restarts.
 - Inspect evidence, explanations, audit history, review state, metrics, and correlation-aware logs.
 - Operate tenant company and audit-partner profiles through the UI.
+- Present the processing architecture through a backend-free, browser-local interactive demonstration.
 - Exercise 120 synthetic bills across clean, ambiguity, boundary, and failure scenarios.
 
 ## Quick start
 
-### Requirements
+### Run the frontend-only showcase
+
+The public demonstration needs only Node.js 20 or newer. It does not call a backend, database, graph service, queue, or paid model:
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+Open <http://localhost:5173/#demo> and choose **Process demo data**. The page follows an editable invoice through simulated API intake, queue handoff, a visualized Cypher/graph exchange, deterministic controls, optional bounded model reasoning, decision routing, and final JSON output.
+
+Build the static artifact for free-tier hosting:
+
+```bash
+cd frontend
+npm run build
+npm run preview
+```
+
+Open <http://localhost:4173/#demo>, or publish `frontend/dist/` on any static host and link to `/#demo`. The simulated calls are visibly labelled; authenticated operations pages still require the complete backend. See [Frontend-only product demonstration](docs/frontend-only-demo.md) for its trust boundary, scenarios, and deployment notes.
+
+### Complete-stack requirements
 
 - Docker Engine with the Compose plugin.
 - At least 4 GB free memory; 6 GB is more comfortable for builds plus Neo4j.
@@ -76,7 +99,7 @@ curl -u demo:demo \
   http://localhost:8000/session
 ```
 
-## Run the comprehensive demo
+## Run the comprehensive full-stack demo
 
 Sign in to tenant `demo`, choose **Use demo data** on the overview, and wait for workers to drain the queue.
 
@@ -410,6 +433,7 @@ docker-compose.yml       Complete local topology
 - [Edge cases and failure handling](docs/edge-cases.md)
 - [Improvement and scaling roadmap](docs/improvements.md)
 - [Frequently asked questions](docs/faq.md)
+- [Frontend-only product demonstration](docs/frontend-only-demo.md)
 - [Demo scenario catalogue](docs/demo-scenarios.md)
 
 ## Production boundary

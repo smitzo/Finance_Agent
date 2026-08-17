@@ -13,6 +13,7 @@ The original single-file architecture guide has been split into focused document
 - [Edge cases and failure handling](docs/edge-cases.md)
 - [Improvement and scaling roadmap](docs/improvements.md)
 - [Frequently asked questions](docs/faq.md)
+- [Frontend-only product demonstration](docs/frontend-only-demo.md)
 - [Demo scenario catalogue](docs/demo-scenarios.md)
 
 Use the root [`readme.md`](readme.md) for installation, local operation, configuration, and verification commands.

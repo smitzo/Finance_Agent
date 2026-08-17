@@ -8,8 +8,9 @@ This directory explains the product from business behavior down to runtime imple
 
 1. [Project overview](project-overview.md)
 2. [Functional and technical flows](flows.md)
-3. [Demo scenario catalogue](demo-scenarios.md)
-4. [Frequently asked questions](faq.md)
+3. [Frontend-only product demonstration](frontend-only-demo.md)
+4. [Demo scenario catalogue](demo-scenarios.md)
+5. [Frequently asked questions](faq.md)
 
 ### Architecture and engineering
 
@@ -27,5 +28,6 @@ This directory explains the product from business behavior down to runtime imple
 - These documents describe the current implementation unless a section is explicitly labelled as a future improvement.
 - Mermaid diagrams are stored inline so they render on GitHub and remain reviewable as text.
 - Demo records are synthetic and use `DEMO-` or `CAR-DEMO` identifiers.
+- Simulated browser exchanges are labelled and must not be described as live backend calls.
 
 When behavior changes, update the closest focused document rather than growing one general-purpose file.
